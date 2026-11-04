@@ -32,6 +32,7 @@ export const AIChatbot = () => {
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [copiedId, setCopiedId] = useState(null);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
   const messagesEndRef = useRef(null);
 
@@ -72,6 +73,7 @@ export const AIChatbot = () => {
   const loadConversation = async (convId) => {
     try {
       setActiveConvId(convId);
+      setMobileDrawerOpen(false);
       const res = await chatApi.getConversation(convId);
       if (res.data?.success) {
         setMessages(res.data.messages || []);
@@ -87,6 +89,7 @@ export const AIChatbot = () => {
   const startNewChat = async (docIdToUse) => {
     try {
       const docId = docIdToUse || selectedDocId || null;
+      setMobileDrawerOpen(false);
       const res = await chatApi.createConversation({ document_id: docId });
       if (res.data?.success) {
         const newConv = res.data.conversation;
@@ -185,15 +188,30 @@ export const AIChatbot = () => {
   ];
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 h-[calc(100vh-100px)] text-left">
-      {/* Left Sidebar: Conversations & Document Filter */}
-      <div className="w-full lg:w-72 comic-box bg-white p-4 flex flex-col justify-between flex-shrink-0">
+    <div className="flex flex-col lg:flex-row gap-3 sm:gap-4 h-[calc(100dvh-120px)] sm:h-[calc(100vh-100px)] text-left relative">
+      {/* Left Sidebar: Conversations & Document Filter (Collapsible on Mobile) */}
+      <div
+        className={`w-full lg:w-72 comic-box bg-white p-3 sm:p-4 flex-col justify-between flex-shrink-0 z-30 transition-all ${
+          mobileDrawerOpen ? 'flex max-h-[65vh] border-4 shadow-[6px_6px_0px_#171510]' : 'hidden lg:flex'
+        }`}
+      >
         <div>
+          {/* Mobile Drawer Close Button */}
+          <div className="lg:hidden flex items-center justify-between pb-2 mb-2 border-b border-ink/20">
+            <span className="font-heading text-sm text-ink uppercase">AI SESSIONS & RAG</span>
+            <button
+              onClick={() => setMobileDrawerOpen(false)}
+              className="text-xs font-comic text-punch-red font-bold hover:underline"
+            >
+              ✕ BACK TO CHAT
+            </button>
+          </div>
+
           {/* New Chat Button */}
           <ComicButton
             variant="yellow"
             size="md"
-            className="w-full mb-3 text-sm"
+            className="w-full mb-3 text-xs sm:text-sm"
             onClick={() => startNewChat()}
             icon={<Plus className="w-4 h-4" />}
           >
@@ -224,7 +242,7 @@ export const AIChatbot = () => {
             PAST SESSIONS ({conversations.length})
           </div>
 
-          <div className="space-y-1.5 overflow-y-auto max-h-[45vh] lg:max-h-[55vh] pr-1">
+          <div className="space-y-1.5 overflow-y-auto max-h-[35vh] lg:max-h-[55vh] pr-1">
             {conversations.length === 0 ? (
               <p className="text-xs text-olive-dark font-sans py-2">No past conversations.</p>
             ) : (
@@ -260,31 +278,42 @@ export const AIChatbot = () => {
       </div>
 
       {/* Main Chat Arena */}
-      <div className="flex-1 comic-box bg-white flex flex-col justify-between overflow-hidden shadow-[6px_6px_0px_#171510]">
+      <div className="flex-1 comic-box bg-white flex flex-col justify-between overflow-hidden shadow-[6px_6px_0px_#171510] min-h-0">
         {/* Header Bar */}
-        <div className="p-3.5 border-b-[3px] border-ink bg-cream flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-md bg-punch-red text-cream flex items-center justify-center border-2 border-ink shadow-[2px_2px_0px_#171510]">
-              <Bot className="w-5 h-5" />
+        <div className="p-2.5 sm:p-3.5 border-b-[3px] border-ink bg-cream flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-md bg-punch-red text-cream flex items-center justify-center border-2 border-ink shadow-[2px_2px_0px_#171510] flex-shrink-0">
+              <Bot className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <h2 className="font-heading text-lg uppercase tracking-wide text-ink">
-                TOPPER AI STUDY COMPANION
+            <div className="min-w-0">
+              <h2 className="font-heading text-sm sm:text-lg uppercase tracking-wide text-ink truncate">
+                TOPPER AI COMPANION
               </h2>
-              <div className="font-mono text-[10px] text-olive-dark flex items-center gap-1">
-                <span>Grounded on:</span>
-                <strong className="text-punch-red">
-                  {selectedDocObj ? selectedDocObj.title : 'All Question Bank Collections'}
+              <div className="font-mono text-[9px] sm:text-[10px] text-olive-dark truncate flex items-center gap-1">
+                <span>RAG:</span>
+                <strong className="text-punch-red truncate">
+                  {selectedDocObj ? selectedDocObj.title : 'All Question Banks'}
                 </strong>
               </div>
             </div>
           </div>
 
-          {selectedDocObj && (
-            <span className="font-comic text-[10px] bg-victory-green text-cream px-2 py-0.5 rounded border border-ink shadow-[1px_1px_0px_#171510] uppercase">
-              RAG TARGET LOCKED
-            </span>
-          )}
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {/* Mobile Toggle Button for Sessions & Docs */}
+            <button
+              type="button"
+              onClick={() => setMobileDrawerOpen((prev) => !prev)}
+              className="lg:hidden comic-btn comic-btn-yellow text-[11px] sm:text-xs px-2 sm:px-2.5 py-1 font-comic flex items-center gap-1 shadow-[2px_2px_0px_#171510]"
+            >
+              <span>{mobileDrawerOpen ? '✕ CHAT' : `💬 SESSIONS (${conversations.length})`}</span>
+            </button>
+
+            {selectedDocObj && (
+              <span className="hidden md:inline-flex font-comic text-[10px] bg-victory-green text-cream px-2 py-0.5 rounded border border-ink shadow-[1px_1px_0px_#171510] uppercase">
+                TARGET LOCKED
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Message Stream */}
@@ -400,19 +429,19 @@ export const AIChatbot = () => {
             e.preventDefault();
             handleSendMessage();
           }}
-          className="p-3 bg-cream border-t-[3px] border-ink flex items-center gap-2"
+          className="p-2 sm:p-3 bg-cream border-t-[3px] border-ink flex items-center gap-2"
         >
           <input
             type="text"
             placeholder={
               selectedDocObj
                 ? `Ask about "${selectedDocObj.title}"...`
-                : 'Ask any question from your batch syllabus...'
+                : 'Ask any syllabus question...'
             }
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             disabled={sending}
-            className="comic-input text-xs sm:text-sm bg-white"
+            className="comic-input text-xs sm:text-sm bg-white flex-1 min-w-0 py-2 sm:py-2.5"
           />
 
           <ComicButton
@@ -421,8 +450,9 @@ export const AIChatbot = () => {
             size="md"
             disabled={sending || !inputText.trim()}
             icon={<Send className="w-4 h-4" />}
+            className="flex-shrink-0 px-3 sm:px-4 py-2"
           >
-            SEND
+            <span className="hidden sm:inline">SEND</span>
           </ComicButton>
         </form>
       </div>

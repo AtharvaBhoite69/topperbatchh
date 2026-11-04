@@ -122,24 +122,72 @@ export const ScreenshotProtector = ({ children }) => {
     };
     window.addEventListener('click', recordInteraction, { once: true });
     window.addEventListener('keydown', recordInteraction, { once: true });
+    window.addEventListener('touchstart', recordInteraction, { once: true });
 
-    // Keyboard handlers (Strictly checking screenshot keyboard events, NOT blur or tab switches)
+    // 1. Mobile 3-Finger Screenshot Gesture (Universal on Xiaomi, OnePlus, Realme, Oppo, Samsung)
+    const handleTouchStart = (e) => {
+      recordInteraction();
+      if (e.touches && e.touches.length >= 3) {
+        triggerEasterEgg();
+      }
+    };
+    const handleTouchMove = (e) => {
+      if (e.touches && e.touches.length >= 3) {
+        triggerEasterEgg();
+      }
+    };
+
+    // 2. Mobile Hardware Screenshot Capture Signature (Power + Volume Down flash)
+    // When a screenshot is taken on Android/iOS, the system overlay steals focus momentarily (100ms - 1500ms).
+    let blurTime = 0;
+    const isTouchDevice = () => 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+    const handleBlur = () => {
+      if (isTouchDevice()) {
+        blurTime = Date.now();
+      }
+    };
+
+    const handleFocus = () => {
+      if (blurTime > 0) {
+        const duration = Date.now() - blurTime;
+        blurTime = 0;
+        // Exact time signature of OS screenshot shutter animation / preview dialog
+        if (duration >= 80 && duration <= 1600 && isTouchDevice()) {
+          triggerEasterEgg();
+        }
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden && isTouchDevice()) {
+        blurTime = Date.now();
+      } else if (!document.hidden && blurTime > 0) {
+        const duration = Date.now() - blurTime;
+        blurTime = 0;
+        if (duration >= 80 && duration <= 1600 && isTouchDevice()) {
+          triggerEasterEgg();
+        }
+      }
+    };
+
+    // 3. Desktop Keyboard Handlers (PrintScreen, Snipping tool, Ctrl+P)
     const handleKeyDown = (e) => {
-      // 1. PrintScreen key
+      // PrintScreen key
       if (e.key === 'PrintScreen' || e.keyCode === 44) {
         e.preventDefault();
         triggerEasterEgg();
         return false;
       }
 
-      // 2. Ctrl+P / Cmd+P (Print to PDF)
+      // Ctrl+P / Cmd+P (Print to PDF)
       if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P' || e.keyCode === 80)) {
         e.preventDefault();
         triggerEasterEgg();
         return false;
       }
 
-      // 3. Snipping tool shortcut (Ctrl+Shift+S / Cmd+Shift+3/4)
+      // Snipping tool shortcut (Ctrl+Shift+S / Cmd+Shift+3/4)
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 's' || e.key === 'S')) {
         e.preventDefault();
         triggerEasterEgg();
@@ -147,7 +195,7 @@ export const ScreenshotProtector = ({ children }) => {
       }
     };
 
-    // Also listen on keyup (Windows Chrome frequently delivers PrintScreen on keyup)
+    // Also listen on keyup (Windows Chrome delivers PrintScreen on keyup)
     const handleKeyUp = (e) => {
       if (e.key === 'PrintScreen' || e.keyCode === 44) {
         triggerEasterEgg();
@@ -156,12 +204,23 @@ export const ScreenshotProtector = ({ children }) => {
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('touchstart', handleTouchStart, { passive: true });
+    window.addEventListener('touchmove', handleTouchMove, { passive: true });
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       window.removeEventListener('click', recordInteraction);
       window.removeEventListener('keydown', recordInteraction);
+      window.removeEventListener('touchstart', recordInteraction);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (timerRef.current) clearTimeout(timerRef.current);
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
