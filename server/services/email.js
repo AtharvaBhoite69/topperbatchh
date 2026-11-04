@@ -41,15 +41,8 @@ async function sendEmail(to, subject, html) {
   const transport = getTransporter();
 
   if (!transport) {
-    // Log to console in development
-    if (env.NODE_ENV !== 'production') {
-      console.log('📧 Email (not sent - SMTP not configured):');
-      console.log(`   To: ${to}`);
-      console.log(`   Subject: ${subject}`);
-      console.log(`   Body: ${html.substring(0, 200)}...`);
-      return { messageId: 'dev-logged', logged: true };
-    }
-    throw new Error('Email service not configured.');
+    console.log(`📧 [Email Not Sent - SMTP Not Configured] To: ${to} | Subject: ${subject}`);
+    return { messageId: 'unconfigured-smtp-skipped', skipped: true };
   }
 
   try {
@@ -62,8 +55,8 @@ async function sendEmail(to, subject, html) {
     console.log(`📧 Email sent to ${to}: ${info.messageId}`);
     return info;
   } catch (err) {
-    console.error('Email sending failed:', err);
-    throw err;
+    console.error('Email sending failed (non-fatal):', err.message);
+    return { messageId: 'send-failed', error: err.message };
   }
 }
 

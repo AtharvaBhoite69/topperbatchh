@@ -156,11 +156,15 @@ async function handleRegistrationAction(req, res, next) {
       req
     );
 
-    // Attempt email notification
-    if (action === 'approve') {
-      await sendApprovalNotification(user.email, user.full_name);
-    } else {
-      await sendRejectionNotification(user.email, user.full_name);
+    // Attempt email notification gracefully
+    try {
+      if (action === 'approve') {
+        await sendApprovalNotification(user.email, user.full_name);
+      } else {
+        await sendRejectionNotification(user.email, user.full_name);
+      }
+    } catch (emailErr) {
+      console.warn('Student status notification email warning:', emailErr.message);
     }
 
     return res.status(200).json({
