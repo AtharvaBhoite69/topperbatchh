@@ -8,8 +8,14 @@ let genAI = null;
 let model = null;
 let embeddingModel = null;
 
-// Supported active Gemini models in order of preference
-const MODEL_CANDIDATES = ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-flash-latest'];
+// Supported active Gemini models in order of priority (starting with stable, high-throughput flash-lite models)
+const MODEL_CANDIDATES = [
+  'gemini-3.5-flash-lite',
+  'gemini-flash-lite-latest',
+  'gemini-3.6-flash',
+  'gemini-3.8-flash',
+  'gemini-3.5-flash',
+];
 
 /**
  * Initialize the Gemini AI client.

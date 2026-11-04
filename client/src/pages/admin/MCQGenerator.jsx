@@ -972,3 +972,4 @@ export const MCQGenerator = () => {
 };
 
 export default MCQGenerator;
+
