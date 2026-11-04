@@ -34,6 +34,8 @@ export const Login = () => {
       if (res?.success) {
         toast.success(`Welcome back, ${res.user?.full_name}!`);
         navigate(from, { replace: true });
+      } else {
+        toast.error(res?.error || res?.message || 'Login failed. Please check your credentials.');
       }
     } catch (err) {
       const errRes = err.response?.data;

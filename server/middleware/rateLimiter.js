@@ -19,11 +19,11 @@ const generalLimiter = rateLimit({
 });
 
 /**
- * Auth rate limiter: 100 in dev / 10 in prod per 15 minutes
+ * Auth rate limiter: 100 in dev / 50 in prod per 15 minutes
  */
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: isDev ? 100 : 10,
+  max: isDev ? 100 : 50,
   message: { error: 'Too many authentication attempts. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,

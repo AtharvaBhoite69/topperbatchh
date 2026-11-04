@@ -5,6 +5,15 @@ const api = axios.create({
   withCredentials: true,
 });
 
+// Request interceptor: attach Bearer token from localStorage for serverless compatibility
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('topperbatch_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 // Response interceptor: redirect to login on 401
 api.interceptors.response.use(
   (res) => res,

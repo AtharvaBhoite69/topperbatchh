@@ -37,17 +37,17 @@ try {
   runMigrations();
   seedDatabase();
 } catch (dbErr) {
-  console.error('Database initialization error:', dbErr);
-  process.exit(1);
+  console.error('Database initialization warning:', dbErr);
 }
 
 const app = express();
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 
 // Setup Socket.io
 const io = new Server(server, {
   cors: {
-    origin: [env.CLIENT_URL, 'http://localhost:5173', 'http://localhost:3000'],
+    origin: true,
     credentials: true,
   },
 });
@@ -65,7 +65,7 @@ app.use(
 
 app.use(
   cors({
-    origin: [env.CLIENT_URL, 'http://localhost:5173', 'http://localhost:3000'],
+    origin: true, // Allow request origin dynamically to support Vercel preview & production URLs
     credentials: true,
   })
 );
@@ -75,19 +75,19 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 app.use(generalLimiter);
 
-// API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/documents', documentsRoutes);
-app.use('/api/chatbot', chatbotRoutes);
-app.use('/api/quiz', quizRoutes);
-app.use('/api/community', communityRoutes);
-app.use('/api/profile', profileRoutes);
-app.use('/api/notifications', notificationsRoutes);
-app.use('/api/search', searchRoutes);
+// API Routes - Mounted on both /api/* and /* to ensure serverless rewrites match seamlessly
+app.use(['/api/auth', '/auth'], authRoutes);
+app.use(['/api/admin', '/admin'], adminRoutes);
+app.use(['/api/documents', '/documents'], documentsRoutes);
+app.use(['/api/chatbot', '/chatbot'], chatbotRoutes);
+app.use(['/api/quiz', '/quiz'], quizRoutes);
+app.use(['/api/community', '/community'], communityRoutes);
+app.use(['/api/profile', '/profile'], profileRoutes);
+app.use(['/api/notifications', '/notifications'], notificationsRoutes);
+app.use(['/api/search', '/search'], searchRoutes);
 
 // Health check endpoint
-app.get('/api/health', (req, res) => {
+app.get(['/api/health', '/health'], (req, res) => {
   res.status(200).json({
     status: 'online',
     platform: 'TopperBatch',
@@ -126,32 +126,37 @@ io.on('connection', (socket) => {
   });
 });
 
-// Serve frontend build if exists in production
-const clientDist = path.join(__dirname, '..', 'client', 'dist');
-app.use(express.static(clientDist));
+// Serve frontend build if exists in production (only when running as standalone Node server)
+if (!process.env.VERCEL) {
+  const clientDist = path.join(__dirname, '..', 'client', 'dist');
+  app.use(express.static(clientDist));
 
-app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api')) {
-    return next();
-  }
-  const indexPath = path.join(clientDist, 'index.html');
-  res.sendFile(indexPath, (err) => {
-    if (err) {
-      res.status(200).json({ message: 'TopperBatch API Server Running. Start frontend client on port 5173.' });
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/auth') || req.path.startsWith('/admin')) {
+      return next();
     }
+    const indexPath = path.join(clientDist, 'index.html');
+    res.sendFile(indexPath, (err) => {
+      if (err) {
+        res.status(200).json({ message: 'TopperBatch API Server Running. Start frontend client on port 5173.' });
+      }
+    });
   });
-});
+}
 
 // Global Error Handler
 app.use(errorHandler);
 
-// Start background cron jobs
-startScheduler();
+// Start background cron jobs (standalone server only)
+if (!process.env.VERCEL) {
+  startScheduler();
+}
 
-// Start Server
+// Start Server (only if not running inside a serverless cloud environment)
 const PORT = env.PORT || 5000;
-server.listen(PORT, () => {
-  console.log(`
+if (!process.env.VERCEL) {
+  server.listen(PORT, () => {
+    console.log(`
   ==============================================================
    💥 TOPPERBATCH SERVER ACTIVE 💥
    Tagline: "ISS SEM, 9 POINTER FIX!"
@@ -159,8 +164,9 @@ server.listen(PORT, () => {
    Mode: ${env.NODE_ENV}
    Admins: ${env.ADMIN_EMAILS.join(', ')}
   ==============================================================
-  `);
-});
+    `);
+  });
+}
 
 module.exports = { app, server };
 

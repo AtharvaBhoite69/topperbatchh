@@ -216,6 +216,7 @@ router.post(
       return res.status(200).json({
         success: true,
         message: `Welcome back, ${user.full_name}!`,
+        token: jwtToken,
         user: sanitizeUser(user),
       });
     } catch (err) {

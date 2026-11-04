@@ -20,6 +20,16 @@ function getDb() {
       fs.mkdirSync(dbDir, { recursive: true });
     }
 
+    // Seed /tmp database on Vercel cold start if source exists
+    if (process.env.VERCEL && !fs.existsSync(env.DB_PATH)) {
+      const sourceDb = path.join(__dirname, '..', 'topperbatch.db');
+      if (fs.existsSync(sourceDb)) {
+        try {
+          fs.copyFileSync(sourceDb, env.DB_PATH);
+        } catch (_) {}
+      }
+    }
+
     const rawDb = new DatabaseSync(env.DB_PATH);
 
     // Pragmas

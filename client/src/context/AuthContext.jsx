@@ -29,6 +29,9 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     const res = await authApi.login({ email, password });
     if (res.data?.success && res.data?.user) {
+      if (res.data?.token) {
+        localStorage.setItem('topperbatch_token', res.data.token);
+      }
       setUser(res.data.user);
     }
     return res.data;
@@ -45,6 +48,7 @@ export const AuthProvider = ({ children }) => {
     } catch (e) {
       // ignore
     } finally {
+      localStorage.removeItem('topperbatch_token');
       setUser(null);
     }
   };
