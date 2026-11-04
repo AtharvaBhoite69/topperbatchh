@@ -14,10 +14,16 @@ const { authenticate, requireAdmin, requireApproved } = require('../middleware/a
 const { extractText } = require('../services/pdf');
 const { indexDocument } = require('../services/rag');
 
-// Multer storage configuration - private uploads folder
-const uploadDir = path.join(__dirname, '..', 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+// Multer storage configuration - private uploads folder (using /tmp on Vercel)
+const uploadDir = process.env.VERCEL
+  ? '/tmp/uploads'
+  : path.join(__dirname, '..', 'uploads');
+try {
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+} catch (e) {
+  console.warn('Documents uploads directory setup warning:', e.message);
 }
 
 const storage = multer.diskStorage({

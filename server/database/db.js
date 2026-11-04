@@ -35,7 +35,11 @@ function getDb() {
     // Pragmas
     try {
       rawDb.exec('PRAGMA foreign_keys = ON;');
-      rawDb.exec('PRAGMA journal_mode = WAL;');
+      if (process.env.VERCEL) {
+        rawDb.exec('PRAGMA journal_mode = DELETE;');
+      } else {
+        rawDb.exec('PRAGMA journal_mode = WAL;');
+      }
       rawDb.exec('PRAGMA synchronous = NORMAL;');
     } catch (e) {
       console.warn('Pragma setup warning:', e.message);

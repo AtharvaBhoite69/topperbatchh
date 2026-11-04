@@ -12,9 +12,15 @@ const { getDb } = require('../database/db');
 const { generateId, sanitizeUser } = require('../utils/helpers');
 const { authenticate, requireApproved } = require('../middleware/auth');
 
-const avatarDir = path.join(__dirname, '..', 'uploads', 'avatars');
-if (!fs.existsSync(avatarDir)) {
-  fs.mkdirSync(avatarDir, { recursive: true });
+const avatarDir = process.env.VERCEL
+  ? '/tmp/uploads/avatars'
+  : path.join(__dirname, '..', 'uploads', 'avatars');
+try {
+  if (!fs.existsSync(avatarDir)) {
+    fs.mkdirSync(avatarDir, { recursive: true });
+  }
+} catch (e) {
+  console.warn('Avatars upload directory setup warning:', e.message);
 }
 
 const avatarStorage = multer.diskStorage({

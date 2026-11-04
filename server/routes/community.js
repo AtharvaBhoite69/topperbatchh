@@ -14,10 +14,16 @@ const { generateId, paginate } = require('../utils/helpers');
 const { authenticate, requireApproved, requireAdmin } = require('../middleware/auth');
 const env = require('../config/env');
 
-// Ensure community uploads folder exists
-const uploadsDir = path.join(__dirname, '..', 'uploads', 'community');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
+// Ensure community uploads folder exists (using /tmp on Vercel)
+const uploadsDir = process.env.VERCEL
+  ? '/tmp/uploads/community'
+  : path.join(__dirname, '..', 'uploads', 'community');
+try {
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+} catch (e) {
+  console.warn('Community uploads directory setup warning:', e.message);
 }
 
 // Multer storage for community file attachments (Notes & Resources)
