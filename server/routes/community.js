@@ -78,12 +78,24 @@ router.use(authenticate, requireApproved);
 router.get('/channels', (req, res, next) => {
   try {
     const db = getDb();
-    const channels = db.prepare(`
+    let channels = db.prepare(`
       SELECT c.*,
              (SELECT COUNT(*) FROM community_messages m WHERE m.channel_id = c.id AND m.is_deleted = 0) as message_count
       FROM community_channels c
       ORDER BY c.display_order ASC, c.name ASC
     `).all();
+
+    // If channels table is empty on fresh cold start, auto-seed the official 3 channels immediately
+    if (!channels || channels.length === 0) {
+      const { seedDatabase } = require('../database/seed');
+      seedDatabase();
+      channels = db.prepare(`
+        SELECT c.*,
+               (SELECT COUNT(*) FROM community_messages m WHERE m.channel_id = c.id AND m.is_deleted = 0) as message_count
+        FROM community_channels c
+        ORDER BY c.display_order ASC, c.name ASC
+      `).all();
+    }
 
     return res.status(200).json({ success: true, channels });
   } catch (err) {

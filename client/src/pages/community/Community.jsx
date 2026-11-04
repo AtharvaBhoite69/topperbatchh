@@ -72,22 +72,41 @@ export const Community = () => {
     fetchChannels();
   }, []);
 
-  // 2. Fetch messages & subscribe to socket room on channel change
+  // 2. Fetch messages, subscribe to socket room, and auto-poll every 2.5s for Vercel serverless live sync
   useEffect(() => {
     if (!activeChannelId) return;
 
-    const fetchMessages = async () => {
+    let isMounted = true;
+
+    const fetchMessages = async (isBackgroundPoll = false) => {
       try {
         const res = await commApi.getMessages(activeChannelId);
-        if (res.data?.success) {
-          setMessages(res.data.messages || []);
+        if (isMounted && res.data?.success) {
+          const fresh = res.data.messages || [];
+          setMessages((prev) => {
+            // Only update state if message IDs or contents changed to avoid unnecessary re-renders
+            if (
+              prev.length === fresh.length &&
+              prev.every((m, i) => m.id === fresh[i]?.id && m.content === fresh[i]?.content && m.is_pinned === fresh[i]?.is_pinned)
+            ) {
+              return prev;
+            }
+            return fresh;
+          });
         }
       } catch (err) {
-        toast.error('Failed to load channel messages.');
+        if (!isBackgroundPoll) {
+          toast.error('Failed to load channel messages.');
+        }
       }
     };
 
-    fetchMessages();
+    fetchMessages(false);
+
+    // Live sync polling interval (2.5s) for environments like Vercel where WebSockets disconnect
+    const pollInterval = setInterval(() => {
+      fetchMessages(true);
+    }, 2500);
 
     if (socket) {
       socket.emit('join_channel', activeChannelId);
@@ -154,6 +173,8 @@ export const Community = () => {
       socket.on('user_typing', handleUserTyping);
 
       return () => {
+        isMounted = false;
+        clearInterval(pollInterval);
         socket.emit('leave_channel', activeChannelId);
         socket.off('new_message', handleNewMessage);
         socket.off('reaction_update', handleReactionUpdate);
@@ -163,6 +184,11 @@ export const Community = () => {
         socket.off('user_typing', handleUserTyping);
       };
     }
+
+    return () => {
+      isMounted = false;
+      clearInterval(pollInterval);
+    };
   }, [activeChannelId, socket, user?.id]);
 
   useEffect(() => {
