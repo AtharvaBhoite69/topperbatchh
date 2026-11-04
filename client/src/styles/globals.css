@@ -1,0 +1,37 @@
+@import './comic.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-color: #F5E9D1;
+  font-family: 'Inter', sans-serif;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #F5E9D1;
+}
+::-webkit-scrollbar-thumb {
+  background: #666052;
+  border: 2px solid #F5E9D1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #171510;
+}
+
+/* Selection */
+::selection {
+  background: #F5B900;
+  color: #171510;
+}
+
+/* Focus ring */
+*:focus-visible {
+  outline: 3px solid #F5B900;
+  outline-offset: 2px;
+}
