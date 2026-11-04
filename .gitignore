@@ -6,6 +6,8 @@ build/
 *.db-shm
 *.db-wal
 *.sqlite
+*.backup
+server/*.backup
 uploads/
 server/uploads/
 *.log

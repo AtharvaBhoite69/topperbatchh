@@ -1,6 +1,7 @@
 // =============================================================================
 // TopperBatch - Admin AI PDF-to-MCQ Generator Routes
 // STRICT ADMIN ONLY: Students are blocked by requireAdmin on every endpoint
+// Production-Ready: Supabase PostgreSQL & Gemini API
 // =============================================================================
 
 const express = require('express');
@@ -69,7 +70,7 @@ router.post('/generate', upload.single('file'), async (req, res, next) => {
       filePath = req.file.path;
       originalName = req.file.originalname;
     } else if (document_id) {
-      const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(document_id);
+      const doc = await db.prepare('SELECT * FROM documents WHERE id = ?').get(document_id);
       if (!doc) {
         return res.status(404).json({ error: 'Vault document not found.' });
       }
@@ -95,9 +96,9 @@ router.post('/generate', upload.single('file'), async (req, res, next) => {
       instructions: instructions ? instructions.trim() : '',
     });
 
-    // Save as draft session in SQLite
+    // Save as draft session
     const sessionId = generateId();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO mcq_draft_sessions (
         id, admin_id, document_id, source_pdf_name, topic,
         difficulty, question_style, question_count, instructions,
@@ -156,7 +157,7 @@ router.post('/regenerate-question', async (req, res, next) => {
     let originalName = source_pdf_name || 'Document.pdf';
 
     if (document_id) {
-      const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(document_id);
+      const doc = await db.prepare('SELECT * FROM documents WHERE id = ?').get(document_id);
       if (doc) {
         filePath = path.join(uploadDir, doc.filename);
         originalName = doc.original_name || doc.title;
@@ -164,9 +165,9 @@ router.post('/regenerate-question', async (req, res, next) => {
     }
 
     if (!filePath && sessionId) {
-      const session = db.prepare('SELECT * FROM mcq_draft_sessions WHERE id = ?').get(sessionId);
+      const session = await db.prepare('SELECT * FROM mcq_draft_sessions WHERE id = ?').get(sessionId);
       if (session && session.document_id) {
-        const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(session.document_id);
+        const doc = await db.prepare('SELECT * FROM documents WHERE id = ?').get(session.document_id);
         if (doc) {
           filePath = path.join(uploadDir, doc.filename);
           originalName = doc.original_name || doc.title;
@@ -211,10 +212,10 @@ router.post('/regenerate-question', async (req, res, next) => {
  * GET /api/admin/mcq-generator/drafts
  * List all saved draft sessions
  */
-router.get('/drafts', (req, res, next) => {
+router.get('/drafts', async (req, res, next) => {
   try {
     const db = getDb();
-    const drafts = db.prepare(`
+    const drafts = await db.prepare(`
       SELECT id, source_pdf_name, topic, difficulty, question_style,
              question_count, status, created_at, updated_at
       FROM mcq_draft_sessions
@@ -233,11 +234,11 @@ router.get('/drafts', (req, res, next) => {
  * GET /api/admin/mcq-generator/drafts/:id
  * Retrieve a specific draft session with questions
  */
-router.get('/drafts/:id', (req, res, next) => {
+router.get('/drafts/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
     const db = getDb();
-    const draft = db.prepare('SELECT * FROM mcq_draft_sessions WHERE id = ?').get(id);
+    const draft = await db.prepare('SELECT * FROM mcq_draft_sessions WHERE id = ?').get(id);
 
     if (!draft) {
       return res.status(404).json({ error: 'Draft session not found.' });
@@ -261,7 +262,7 @@ router.get('/drafts/:id', (req, res, next) => {
  * PUT /api/admin/mcq-generator/drafts/:id
  * Save updated question edits into the draft session
  */
-router.put('/drafts/:id', (req, res, next) => {
+router.put('/drafts/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
     const { questions } = req.body;
@@ -271,7 +272,7 @@ router.put('/drafts/:id', (req, res, next) => {
     }
 
     const db = getDb();
-    db.prepare(`
+    await db.prepare(`
       UPDATE mcq_draft_sessions
       SET generated_data = ?, question_count = ?, updated_at = datetime('now')
       WHERE id = ?
@@ -286,11 +287,11 @@ router.put('/drafts/:id', (req, res, next) => {
 /**
  * DELETE /api/admin/mcq-generator/drafts/:id
  */
-router.delete('/drafts/:id', (req, res, next) => {
+router.delete('/drafts/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
     const db = getDb();
-    db.prepare('DELETE FROM mcq_draft_sessions WHERE id = ?').run(id);
+    await db.prepare('DELETE FROM mcq_draft_sessions WHERE id = ?').run(id);
     return res.status(200).json({ success: true, message: 'Draft deleted.' });
   } catch (err) {
     next(err);
@@ -302,7 +303,7 @@ router.delete('/drafts/:id', (req, res, next) => {
  * Publish approved questions as a Daily Challenge or into the Question Bank.
  * Unapproved questions are strictly excluded.
  */
-router.post('/publish', (req, res, next) => {
+router.post('/publish', async (req, res, next) => {
   try {
     const {
       sessionId,
@@ -325,85 +326,82 @@ router.post('/publish', (req, res, next) => {
 
     let challengeId = null;
 
-    const publishTx = db.transaction(() => {
-      // 1. Create Challenge if requested
-      if (publishType === 'challenge' || publishType === 'both') {
-        challengeId = generateId();
-        const title = challengeTitle
-          ? challengeTitle.trim()
-          : `Daily Battle: ${approvedQuestions[0]?.topic || 'Syllabus Sprint'} (${targetDate})`;
+    // 1. Create Challenge if requested
+    if (publishType === 'challenge' || publishType === 'both') {
+      challengeId = generateId();
+      const title = challengeTitle
+        ? challengeTitle.trim()
+        : `Daily Battle: ${approvedQuestions[0]?.topic || 'Syllabus Sprint'} (${targetDate})`;
 
-        db.prepare(`
-          INSERT INTO mcq_challenges (
-            id, title, description, subject_id, challenge_date,
-            duration_minutes, question_count, is_active, is_published,
-            scoring_correct, created_by
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?)
-        `).run(
-          challengeId,
-          title,
-          `AI-forged challenge from ${approvedQuestions[0]?.source_pdf || 'curated question bank'}. 9-pointer practice!`,
-          subjectId || null,
-          targetDate,
-          parseInt(durationMinutes, 10) || 15,
-          approvedQuestions.length,
-          parseInt(scoringCorrect, 10) || 10,
-          req.user.id
-        );
-      }
+      await db.prepare(`
+        INSERT INTO mcq_challenges (
+          id, title, description, subject_id, challenge_date,
+          duration_minutes, question_count, is_active, is_published,
+          scoring_correct, created_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?)
+      `).run(
+        challengeId,
+        title,
+        `AI-forged challenge from ${approvedQuestions[0]?.source_pdf || 'curated question bank'}. 9-pointer practice!`,
+        subjectId || null,
+        targetDate,
+        parseInt(durationMinutes, 10) || 15,
+        approvedQuestions.length,
+        parseInt(scoringCorrect, 10) || 10,
+        req.user.id
+      );
+    }
 
-      // 2. Insert approved questions & 4 answer options
-      const insertQuestionStmt = db.prepare(`
-        INSERT INTO questions (
-          id, challenge_id, question_text, explanation, difficulty,
-          subject_id, is_approved, page_number, topic, source_pdf_name, created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
-      `);
+    // 2. Insert approved questions & 4 answer options
+    const insertQuestionStmt = db.prepare(`
+      INSERT INTO questions (
+        id, challenge_id, question_text, explanation, difficulty,
+        subject_id, is_approved, page_number, topic, source_pdf_name, created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+    `);
 
-      const insertOptionStmt = db.prepare(`
-        INSERT INTO answer_options (
-          id, question_id, option_text, is_correct, option_order
-        ) VALUES (?, ?, ?, ?, ?)
-      `);
+    const insertOptionStmt = db.prepare(`
+      INSERT INTO answer_options (
+        id, question_id, option_text, is_correct, option_order
+      ) VALUES (?, ?, ?, ?, ?)
+    `);
 
-      for (const q of approvedQuestions) {
-        const qId = generateId();
-        insertQuestionStmt.run(
+    for (const q of approvedQuestions) {
+      const qId = generateId();
+      await insertQuestionStmt.run(
+        qId,
+        challengeId, // linked to challenge or null for question bank only
+        q.question.trim(),
+        q.explanation || null,
+        ['easy', 'medium', 'hard'].includes((q.difficulty || '').toLowerCase()) ? q.difficulty.toLowerCase() : 'medium',
+        subjectId || null,
+        parseInt(q.source_page || 1, 10),
+        q.topic || null,
+        q.source_pdf || null,
+        req.user.id
+      );
+
+      const correctLabel = (q.correct_answer || 'A').toUpperCase().trim();
+      const options = Array.isArray(q.options) ? q.options : [];
+
+      for (let idx = 0; idx < options.length; idx++) {
+        const opt = options[idx];
+        const optLabel = (opt.label || ['A', 'B', 'C', 'D'][idx] || '').toUpperCase().trim();
+        const isCorrect = optLabel === correctLabel ? 1 : 0;
+        await insertOptionStmt.run(
+          generateId(),
           qId,
-          challengeId, // linked to challenge or null for question bank only
-          q.question.trim(),
-          q.explanation || null,
-          ['easy', 'medium', 'hard'].includes((q.difficulty || '').toLowerCase()) ? q.difficulty.toLowerCase() : 'medium',
-          subjectId || null,
-          parseInt(q.source_page || 1, 10),
-          q.topic || null,
-          q.source_pdf || null,
-          req.user.id
+          (opt.text || `Option ${optLabel}`).trim(),
+          isCorrect,
+          idx + 1
         );
-
-        const correctLabel = (q.correct_answer || 'A').toUpperCase().trim();
-        const options = Array.isArray(q.options) ? q.options : [];
-
-        options.forEach((opt, idx) => {
-          const optLabel = (opt.label || ['A', 'B', 'C', 'D'][idx] || '').toUpperCase().trim();
-          const isCorrect = optLabel === correctLabel ? 1 : 0;
-          insertOptionStmt.run(
-            generateId(),
-            qId,
-            (opt.text || `Option ${optLabel}`).trim(),
-            isCorrect,
-            idx + 1
-          );
-        });
       }
+    }
 
-      // 3. Mark session as published if session ID provided
-      if (sessionId) {
-        db.prepare("UPDATE mcq_draft_sessions SET status = 'published', updated_at = datetime('now') WHERE id = ?").run(sessionId);
-      }
-    });
-
-    publishTx();
+    // 3. Mark session as published if session ID provided
+    if (sessionId) {
+      await db.prepare("UPDATE mcq_draft_sessions SET status = 'published', updated_at = datetime('now') WHERE id = ?").run(sessionId);
+    }
 
     return res.status(201).json({
       success: true,
@@ -421,4 +419,3 @@ router.post('/publish', (req, res, next) => {
 });
 
 module.exports = router;
-

@@ -1,5 +1,6 @@
 // =============================================================================
 // TopperBatch - Documents & Question Bank Routes
+// Production-Ready: Supabase PostgreSQL & Supabase Storage
 // =============================================================================
 
 const express = require('express');
@@ -13,6 +14,11 @@ const { generateId, paginate } = require('../utils/helpers');
 const { authenticate, requireAdmin, requireApproved } = require('../middleware/auth');
 const { extractText } = require('../services/pdf');
 const { indexDocument } = require('../services/rag');
+const {
+  uploadToStorage,
+  getSignedDownloadUrl,
+  BUCKET_DOCUMENTS,
+} = require('../services/supabaseStorage');
 
 // Multer storage configuration - private uploads folder (using /tmp on Vercel)
 const uploadDir = process.env.VERCEL
@@ -60,7 +66,7 @@ router.use(authenticate);
  * GET /api/documents
  * List visible documents with search and filters
  */
-router.get('/', requireApproved, (req, res, next) => {
+router.get('/', requireApproved, async (req, res, next) => {
   try {
     const { semester, subject_id, unit_id, search, page = 1, limit = 20 } = req.query;
     const db = getDb();
@@ -93,7 +99,8 @@ router.get('/', requireApproved, (req, res, next) => {
     const whereClause = whereConditions.join(' AND ');
 
     const countStmt = db.prepare(`SELECT COUNT(*) as total FROM documents d WHERE ${whereClause}`);
-    const total = countStmt.get(...params).total;
+    const countRow = await countStmt.get(...params);
+    const total = countRow ? parseInt(countRow.total, 10) : 0;
 
     const queryStmt = db.prepare(`
       SELECT d.*, s.name as subject_name, s.code as subject_code,
@@ -109,16 +116,16 @@ router.get('/', requireApproved, (req, res, next) => {
       LIMIT ? OFFSET ?
     `);
 
-    const documents = queryStmt.all(req.user.id, ...params, l, o);
+    const documents = await queryStmt.all(req.user.id, ...params, l, o);
 
     return res.status(200).json({
       success: true,
       documents,
       pagination: {
-        total,
         page: parseInt(page, 10),
         limit: l,
-        pages: Math.ceil(total / l),
+        total,
+        totalPages: Math.ceil(total / l),
       },
     });
   } catch (err) {
@@ -128,18 +135,22 @@ router.get('/', requireApproved, (req, res, next) => {
 
 /**
  * GET /api/documents/subjects
- * Get all subjects grouped by semester
  */
-router.get('/subjects', requireApproved, (req, res, next) => {
+router.get('/subjects', requireApproved, async (req, res, next) => {
   try {
+    const { semester_id } = req.query;
     const db = getDb();
-    const subjects = db.prepare(`
-      SELECT s.*, sem.name as semester_name, sem.number as semester_number,
-             (SELECT COUNT(*) FROM documents d WHERE d.subject_id = s.id AND d.is_visible = 1) as document_count
-      FROM subjects s
-      LEFT JOIN semesters sem ON s.semester_id = sem.id
-      ORDER BY sem.number ASC, s.name ASC
-    `).all();
+
+    let sql = 'SELECT * FROM subjects';
+    let params = [];
+
+    if (semester_id) {
+      sql += ' WHERE semester_id = ?';
+      params.push(semester_id);
+    }
+
+    sql += ' ORDER BY name ASC';
+    const subjects = await db.prepare(sql).all(...params);
 
     return res.status(200).json({ success: true, subjects });
   } catch (err) {
@@ -148,12 +159,26 @@ router.get('/subjects', requireApproved, (req, res, next) => {
 });
 
 /**
+ * GET /api/documents/subjects/:subjectId/units
+ */
+router.get('/subjects/:subjectId/units', requireApproved, async (req, res, next) => {
+  try {
+    const { subjectId } = req.params;
+    const db = getDb();
+    const units = await db.prepare('SELECT * FROM units WHERE subject_id = ? ORDER BY number ASC').all(subjectId);
+    return res.status(200).json({ success: true, units });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /api/documents/semesters
  */
-router.get('/semesters', requireApproved, (req, res, next) => {
+router.get('/semesters', requireApproved, async (req, res, next) => {
   try {
     const db = getDb();
-    const semesters = db.prepare('SELECT * FROM semesters ORDER BY number ASC').all();
+    const semesters = await db.prepare('SELECT * FROM semesters ORDER BY number ASC').all();
     return res.status(200).json({ success: true, semesters });
   } catch (err) {
     next(err);
@@ -164,10 +189,10 @@ router.get('/semesters', requireApproved, (req, res, next) => {
  * GET /api/documents/saved
  * List user's saved/bookmarked documents
  */
-router.get('/saved', requireApproved, (req, res, next) => {
+router.get('/saved', requireApproved, async (req, res, next) => {
   try {
     const db = getDb();
-    const saved = db.prepare(`
+    const saved = await db.prepare(`
       SELECT d.*, s.name as subject_name, u.name as unit_name, sd.created_at as saved_at
       FROM saved_documents sd
       JOIN documents d ON sd.document_id = d.id
@@ -187,12 +212,12 @@ router.get('/saved', requireApproved, (req, res, next) => {
  * GET /api/documents/:id
  * Get single document details
  */
-router.get('/:id', requireApproved, (req, res, next) => {
+router.get('/:id', requireApproved, async (req, res, next) => {
   try {
     const { id } = req.params;
     const db = getDb();
 
-    const doc = db.prepare(`
+    const doc = await db.prepare(`
       SELECT d.*, s.name as subject_name, u.name as unit_name, sem.name as semester_name,
              CASE WHEN sd.id IS NOT NULL THEN 1 ELSE 0 END as is_saved
       FROM documents d
@@ -219,14 +244,14 @@ router.get('/:id', requireApproved, (req, res, next) => {
 
 /**
  * GET /api/documents/:id/view
- * Protected inline streaming of PDF file with watermark metadata
+ * Protected delivery of PDF file (Supabase Signed URL or secure stream)
  */
-router.get('/:id/view', requireApproved, (req, res, next) => {
+router.get('/:id/view', requireApproved, async (req, res, next) => {
   try {
     const { id } = req.params;
     const db = getDb();
 
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(id);
+    const doc = await db.prepare('SELECT * FROM documents WHERE id = ?').get(id);
     if (!doc) {
       return res.status(404).json({ error: 'Document not found.' });
     }
@@ -235,12 +260,18 @@ router.get('/:id/view', requireApproved, (req, res, next) => {
       return res.status(403).json({ error: 'Document access is currently disabled.' });
     }
 
+    // 1. Check Supabase Storage Private Signed URL (1-hour validity)
+    const signedUrl = await getSignedDownloadUrl(BUCKET_DOCUMENTS, doc.filename, 3600);
+    if (signedUrl) {
+      return res.redirect(signedUrl);
+    }
+
+    // 2. Fall back to local file streaming if running offline
     const filePath = path.join(uploadDir, doc.filename);
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: 'PDF file is missing on storage.' });
     }
 
-    // Set secure delivery headers
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(doc.original_name)}"`);
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -257,19 +288,20 @@ router.get('/:id/view', requireApproved, (req, res, next) => {
  * POST /api/documents/:id/save
  * Bookmark a document
  */
-router.post('/:id/save', requireApproved, (req, res, next) => {
+router.post('/:id/save', requireApproved, async (req, res, next) => {
   try {
     const { id } = req.params;
     const db = getDb();
 
-    const doc = db.prepare('SELECT id FROM documents WHERE id = ?').get(id);
+    const doc = await db.prepare('SELECT id FROM documents WHERE id = ?').get(id);
     if (!doc) {
       return res.status(404).json({ error: 'Document not found.' });
     }
 
-    db.prepare(`
-      INSERT OR IGNORE INTO saved_documents (id, user_id, document_id)
+    await db.prepare(`
+      INSERT INTO saved_documents (id, user_id, document_id)
       VALUES (?, ?, ?)
+      ON CONFLICT DO NOTHING
     `).run(generateId(), req.user.id, id);
 
     return res.status(200).json({ success: true, message: 'Document saved to your vault!' });
@@ -282,12 +314,12 @@ router.post('/:id/save', requireApproved, (req, res, next) => {
  * DELETE /api/documents/:id/save
  * Remove bookmark
  */
-router.delete('/:id/save', requireApproved, (req, res, next) => {
+router.delete('/:id/save', requireApproved, async (req, res, next) => {
   try {
     const { id } = req.params;
     const db = getDb();
 
-    db.prepare('DELETE FROM saved_documents WHERE user_id = ? AND document_id = ?').run(req.user.id, id);
+    await db.prepare('DELETE FROM saved_documents WHERE user_id = ? AND document_id = ?').run(req.user.id, id);
     return res.status(200).json({ success: true, message: 'Removed from saved documents.' });
   } catch (err) {
     next(err);
@@ -300,7 +332,7 @@ router.delete('/:id/save', requireApproved, (req, res, next) => {
 
 /**
  * POST /api/documents
- * Admin PDF upload & auto-indexing for RAG
+ * Admin PDF upload & auto-indexing for RAG + Supabase Storage sync
  */
 router.post('/', requireAdmin, upload.single('file'), async (req, res, next) => {
   try {
@@ -317,6 +349,9 @@ router.post('/', requireAdmin, upload.single('file'), async (req, res, next) => 
     const docId = generateId();
     const filePath = req.file.path;
 
+    // Upload to Supabase Storage in parallel/background
+    await uploadToStorage(BUCKET_DOCUMENTS, req.file.filename, filePath, 'application/pdf');
+
     // Extract text from PDF
     let pageCount = 0;
     try {
@@ -324,7 +359,7 @@ router.post('/', requireAdmin, upload.single('file'), async (req, res, next) => 
       pageCount = extracted.pageCount || 0;
 
       // Save document record
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO documents (
           id, title, description, filename, original_name, file_size,
           subject_id, unit_id, semester_id, topic, uploaded_by, page_count
@@ -351,7 +386,7 @@ router.post('/', requireAdmin, upload.single('file'), async (req, res, next) => 
           VALUES (?, ?, ?, ?)
         `);
         for (const p of extracted.pages) {
-          pageInsert.run(generateId(), docId, p.pageNumber, p.content || '');
+          await pageInsert.run(generateId(), docId, p.pageNumber, p.content || '');
         }
       }
 
@@ -361,13 +396,13 @@ router.post('/', requireAdmin, upload.single('file'), async (req, res, next) => 
       });
 
       // Notify students
-      const students = db.prepare("SELECT id FROM users WHERE status = 'approved'").all();
+      const students = await db.prepare("SELECT id FROM users WHERE status = 'approved'").all();
       const notifyStmt = db.prepare(`
         INSERT INTO notifications (id, user_id, type, title, message, link)
         VALUES (?, ?, 'document', '📚 New Material Dropped!', ?, ?)
       `);
       for (const s of students) {
-        notifyStmt.run(generateId(), s.id, `New PDF: ${title}`, `/document/${docId}`);
+        await notifyStmt.run(generateId(), s.id, `New PDF: ${title}`, `/document/${docId}`);
       }
 
       return res.status(201).json({
@@ -377,9 +412,8 @@ router.post('/', requireAdmin, upload.single('file'), async (req, res, next) => 
         pageCount,
       });
     } catch (parseErr) {
-      // Clean up uploaded file if extraction fails critically
       if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+        try { fs.unlinkSync(filePath); } catch (_) {}
       }
       return res.status(400).json({ error: `Failed to process PDF: ${parseErr.message}` });
     }
@@ -392,13 +426,13 @@ router.post('/', requireAdmin, upload.single('file'), async (req, res, next) => 
  * PUT /api/documents/:id
  * Admin update document metadata
  */
-router.put('/:id', requireAdmin, (req, res, next) => {
+router.put('/:id', requireAdmin, async (req, res, next) => {
   try {
     const { id } = req.params;
     const { title, description, semester_id, subject_id, unit_id, topic, is_visible } = req.body;
     const db = getDb();
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE documents
       SET title = COALESCE(?, title),
           description = COALESCE(?, description),
@@ -430,20 +464,18 @@ router.put('/:id', requireAdmin, (req, res, next) => {
  * DELETE /api/documents/:id
  * Delete document and remove stored file
  */
-router.delete('/:id', requireAdmin, (req, res, next) => {
+router.delete('/:id', requireAdmin, async (req, res, next) => {
   try {
     const { id } = req.params;
     const db = getDb();
 
-    const doc = db.prepare('SELECT filename FROM documents WHERE id = ?').get(id);
+    const doc = await db.prepare('SELECT filename FROM documents WHERE id = ?').get(id);
     if (!doc) {
       return res.status(404).json({ error: 'Document not found.' });
     }
 
-    // Delete DB record
-    db.prepare('DELETE FROM documents WHERE id = ?').run(id);
+    await db.prepare('DELETE FROM documents WHERE id = ?').run(id);
 
-    // Delete disk file
     const filePath = path.join(uploadDir, doc.filename);
     if (fs.existsSync(filePath)) {
       try {
@@ -462,7 +494,7 @@ router.delete('/:id', requireAdmin, (req, res, next) => {
 /**
  * POST /api/documents/subjects (Admin)
  */
-router.post('/subjects', requireAdmin, (req, res, next) => {
+router.post('/subjects', requireAdmin, async (req, res, next) => {
   try {
     const { name, code, semester_id } = req.body;
     if (!name) return res.status(400).json({ error: 'Subject name is required.' });
@@ -470,7 +502,7 @@ router.post('/subjects', requireAdmin, (req, res, next) => {
     const db = getDb();
     const id = generateId();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO subjects (id, name, code, semester_id)
       VALUES (?, ?, ?, ?)
     `).run(id, name.trim(), code ? code.trim() : null, semester_id ? parseInt(semester_id, 10) : null);
@@ -484,7 +516,7 @@ router.post('/subjects', requireAdmin, (req, res, next) => {
 /**
  * POST /api/documents/units (Admin)
  */
-router.post('/units', requireAdmin, (req, res, next) => {
+router.post('/units', requireAdmin, async (req, res, next) => {
   try {
     const { name, number, subject_id } = req.body;
     if (!name || !subject_id) {
@@ -494,7 +526,7 @@ router.post('/units', requireAdmin, (req, res, next) => {
     const db = getDb();
     const id = generateId();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO units (id, name, number, subject_id)
       VALUES (?, ?, ?, ?)
     `).run(id, name.trim(), number ? parseInt(number, 10) : 1, subject_id);
@@ -506,4 +538,3 @@ router.post('/units', requireAdmin, (req, res, next) => {
 });
 
 module.exports = router;
-

@@ -1,5 +1,6 @@
 // =============================================================================
 // TopperBatch - Authentication Routes
+// Production-Ready: Supabase PostgreSQL & Session Management
 // =============================================================================
 
 const express = require('express');
@@ -49,7 +50,7 @@ router.post(
       const normalizedEmail = email.trim().toLowerCase();
 
       // Check if user already exists
-      const existingUser = db.prepare('SELECT id, status FROM users WHERE email = ?').get(normalizedEmail);
+      const existingUser = await db.prepare('SELECT id, status FROM users WHERE email = ?').get(normalizedEmail);
       if (existingUser) {
         // Return generic success-like response to avoid account enumeration
         return res.status(200).json({
@@ -74,7 +75,7 @@ router.post(
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
-      insertStmt.run(
+      await insertStmt.run(
         userId,
         normalizedEmail,
         passwordHash,
@@ -87,14 +88,14 @@ router.post(
 
       // If non-admin pending registration, notify admins
       if (!isAdmin) {
-        const admins = db.prepare("SELECT id FROM users WHERE role = 'admin'").all();
+        const admins = await db.prepare("SELECT id FROM users WHERE role = 'admin'").all();
         const notifyStmt = db.prepare(`
           INSERT INTO notifications (id, user_id, type, title, message, link)
           VALUES (?, ?, 'registration', 'New Recruit Pending Approval', ?, '/admin/registrations')
         `);
 
         for (const admin of admins) {
-          notifyStmt.run(
+          await notifyStmt.run(
             generateId(),
             admin.id,
             `${fullName.trim()} (${normalizedEmail}) has registered and is awaiting approval.`
@@ -132,7 +133,7 @@ router.post(
       const normalizedEmail = email.trim().toLowerCase();
 
       // Look up user
-      const user = db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail);
+      const user = await db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail);
       if (!user) {
         return res.status(401).json({ error: 'Invalid email or password.' });
       }
@@ -140,7 +141,7 @@ router.post(
       // Check permanent admin auto-promotion
       if (isPermanentAdmin(normalizedEmail)) {
         if (user.role !== 'admin' || user.status !== 'approved') {
-          db.prepare("UPDATE users SET role = 'admin', status = 'approved' WHERE id = ?").run(user.id);
+          await db.prepare("UPDATE users SET role = 'admin', status = 'approved' WHERE id = ?").run(user.id);
           user.role = 'admin';
           user.status = 'approved';
         }
@@ -175,10 +176,10 @@ router.post(
       }
 
       // Device / Session management: enforce max active sessions
-      const setting = db.prepare("SELECT value FROM platform_settings WHERE key = 'max_sessions_per_user'").get();
+      const setting = await db.prepare("SELECT value FROM platform_settings WHERE key = 'max_sessions_per_user'").get();
       const maxSessions = setting ? parseInt(setting.value, 10) : 1;
 
-      const activeSessions = db.prepare(
+      const activeSessions = await db.prepare(
         "SELECT id FROM sessions WHERE user_id = ? AND is_active = 1 ORDER BY created_at ASC"
       ).all(user.id);
 
@@ -187,7 +188,7 @@ router.post(
         const toRevoke = activeSessions.slice(0, activeSessions.length - maxSessions + 1);
         const deactivateStmt = db.prepare("UPDATE sessions SET is_active = 0 WHERE id = ?");
         for (const s of toRevoke) {
-          deactivateStmt.run(s.id);
+          await deactivateStmt.run(s.id);
         }
       }
 
@@ -196,18 +197,18 @@ router.post(
       const rawToken = generateToken();
       const tokenHash = hashToken(rawToken);
       const userAgent = req.headers['user-agent'] || 'Unknown Device';
-      const ipAddress = req.ip || req.connection.remoteAddress || '127.0.0.1';
+      const ipAddress = req.ip || req.connection?.remoteAddress || '127.0.0.1';
 
       // 7 days expiration
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO sessions (id, user_id, token_hash, device_info, ip_address, is_active, expires_at)
         VALUES (?, ?, ?, ?, ?, 1, ?)
       `).run(sessionId, user.id, tokenHash, userAgent, ipAddress, expiresAt);
 
       // Update last active
-      db.prepare("UPDATE users SET last_active_date = datetime('now') WHERE id = ?").run(user.id);
+      await db.prepare("UPDATE users SET last_active_date = datetime('now') WHERE id = ?").run(user.id);
 
       // Create JWT and set cookie
       const jwtToken = createToken(user);
@@ -228,11 +229,11 @@ router.post(
 /**
  * POST /api/auth/logout
  */
-router.post('/logout', authenticate, (req, res) => {
+router.post('/logout', authenticate, async (req, res) => {
   try {
     const db = getDb();
     if (req.sessionId) {
-      db.prepare('UPDATE sessions SET is_active = 0 WHERE id = ?').run(req.sessionId);
+      await db.prepare('UPDATE sessions SET is_active = 0 WHERE id = ?').run(req.sessionId);
     }
     clearAuthCookie(res);
     return res.status(200).json({ success: true, message: 'Logged out successfully.' });
@@ -265,7 +266,7 @@ router.post('/forgot-password', authLimiter, async (req, res, next) => {
 
     const db = getDb();
     const normalizedEmail = email.trim().toLowerCase();
-    const user = db.prepare('SELECT id, full_name FROM users WHERE email = ?').get(normalizedEmail);
+    const user = await db.prepare('SELECT id, full_name FROM users WHERE email = ?').get(normalizedEmail);
 
     // Constant message to prevent account enumeration
     const successResponse = {
@@ -282,7 +283,7 @@ router.post('/forgot-password', authLimiter, async (req, res, next) => {
     const tokenHash = hashToken(resetToken);
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO password_resets (id, user_id, token_hash, expires_at)
       VALUES (?, ?, ?, ?)
     `).run(generateId(), user.id, tokenHash, expiresAt);
@@ -326,7 +327,7 @@ router.post('/reset-password', authLimiter, async (req, res, next) => {
     const db = getDb();
     const tokenHash = hashToken(token);
 
-    const resetRecord = db.prepare(`
+    const resetRecord = await db.prepare(`
       SELECT * FROM password_resets
       WHERE token_hash = ? AND used = 0 AND expires_at > datetime('now')
     `).get(tokenHash);
@@ -339,17 +340,12 @@ router.post('/reset-password', authLimiter, async (req, res, next) => {
     const salt = await bcrypt.genSalt(10);
     const newPasswordHash = await bcrypt.hash(password, salt);
 
-    // Transaction: update password, mark reset used, revoke all sessions
-    const updateTx = db.transaction(() => {
-      db.prepare('UPDATE users SET password_hash = ?, updated_at = datetime(\'now\') WHERE id = ?').run(
-        newPasswordHash,
-        resetRecord.user_id
-      );
-      db.prepare('UPDATE password_resets SET used = 1 WHERE id = ?').run(resetRecord.id);
-      db.prepare('UPDATE sessions SET is_active = 0 WHERE user_id = ?').run(resetRecord.user_id);
-    });
-
-    updateTx();
+    await db.prepare('UPDATE users SET password_hash = ?, updated_at = datetime(\'now\') WHERE id = ?').run(
+      newPasswordHash,
+      resetRecord.user_id
+    );
+    await db.prepare('UPDATE password_resets SET used = 1 WHERE id = ?').run(resetRecord.id);
+    await db.prepare('UPDATE sessions SET is_active = 0 WHERE user_id = ?').run(resetRecord.user_id);
 
     return res.status(200).json({
       success: true,
@@ -361,4 +357,3 @@ router.post('/reset-password', authLimiter, async (req, res, next) => {
 });
 
 module.exports = router;
-

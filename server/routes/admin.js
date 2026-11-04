@@ -1,5 +1,6 @@
 // =============================================================================
 // TopperBatch - Admin Routes
+// Production-Ready: Supabase PostgreSQL
 // =============================================================================
 
 const express = require('express');
@@ -16,11 +17,11 @@ router.use(authenticate, requireAdmin);
 /**
  * Helper to log admin actions into audit_logs table
  */
-function logAudit(adminId, action, targetType, targetId, details, req) {
+async function logAudit(adminId, action, targetType, targetId, details, req) {
   try {
     const db = getDb();
-    const ip = req ? (req.ip || req.connection.remoteAddress || '127.0.0.1') : null;
-    db.prepare(`
+    const ip = req ? (req.ip || req.connection?.remoteAddress || '127.0.0.1') : null;
+    await db.prepare(`
       INSERT INTO audit_logs (id, admin_id, action, target_type, target_id, details, ip_address)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
@@ -41,18 +42,33 @@ function logAudit(adminId, action, targetType, targetId, details, req) {
  * GET /api/admin/stats
  * Real database counts
  */
-router.get('/stats', (req, res, next) => {
+router.get('/stats', async (req, res, next) => {
   try {
     const db = getDb();
 
-    const totalStudents = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'student'").get().count;
-    const approvedStudents = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'student' AND status = 'approved'").get().count;
-    const pendingStudents = db.prepare("SELECT COUNT(*) as count FROM users WHERE status = 'pending'").get().count;
-    const suspendedStudents = db.prepare("SELECT COUNT(*) as count FROM users WHERE status = 'suspended'").get().count;
-    const totalDocuments = db.prepare('SELECT COUNT(*) as count FROM documents').get().count;
-    const totalQuizAttempts = db.prepare('SELECT COUNT(*) as count FROM quiz_attempts WHERE is_submitted = 1').get().count;
-    const activeToday = db.prepare("SELECT COUNT(DISTINCT user_id) as count FROM sessions WHERE is_active = 1 AND date(created_at) = date('now')").get().count;
-    const totalAnnouncements = db.prepare('SELECT COUNT(*) as count FROM announcements WHERE is_active = 1').get().count;
+    const totalStudentsRow = await db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'student'").get();
+    const totalStudents = totalStudentsRow ? parseInt(totalStudentsRow.count, 10) : 0;
+
+    const approvedStudentsRow = await db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'student' AND status = 'approved'").get();
+    const approvedStudents = approvedStudentsRow ? parseInt(approvedStudentsRow.count, 10) : 0;
+
+    const pendingStudentsRow = await db.prepare("SELECT COUNT(*) as count FROM users WHERE status = 'pending'").get();
+    const pendingStudents = pendingStudentsRow ? parseInt(pendingStudentsRow.count, 10) : 0;
+
+    const suspendedStudentsRow = await db.prepare("SELECT COUNT(*) as count FROM users WHERE status = 'suspended'").get();
+    const suspendedStudents = suspendedStudentsRow ? parseInt(suspendedStudentsRow.count, 10) : 0;
+
+    const totalDocumentsRow = await db.prepare('SELECT COUNT(*) as count FROM documents').get();
+    const totalDocuments = totalDocumentsRow ? parseInt(totalDocumentsRow.count, 10) : 0;
+
+    const totalQuizAttemptsRow = await db.prepare('SELECT COUNT(*) as count FROM quiz_attempts WHERE is_submitted = 1').get();
+    const totalQuizAttempts = totalQuizAttemptsRow ? parseInt(totalQuizAttemptsRow.count, 10) : 0;
+
+    const activeTodayRow = await db.prepare("SELECT COUNT(DISTINCT user_id) as count FROM sessions WHERE is_active = 1 AND date(created_at) = date('now')").get();
+    const activeToday = activeTodayRow ? parseInt(activeTodayRow.count, 10) : 0;
+
+    const totalAnnouncementsRow = await db.prepare('SELECT COUNT(*) as count FROM announcements WHERE is_active = 1').get();
+    const totalAnnouncements = totalAnnouncementsRow ? parseInt(totalAnnouncementsRow.count, 10) : 0;
 
     return res.status(200).json({
       success: true,
@@ -76,10 +92,10 @@ router.get('/stats', (req, res, next) => {
  * GET /api/admin/registrations
  * List pending registrations
  */
-router.get('/registrations', (req, res, next) => {
+router.get('/registrations', async (req, res, next) => {
   try {
     const db = getDb();
-    const pending = db.prepare(`
+    const pending = await db.prepare(`
       SELECT id, email, full_name, semester, department, created_at
       FROM users
       WHERE status = 'pending'
@@ -124,16 +140,16 @@ async function handleRegistrationAction(req, res, next) {
       return res.status(400).json({ error: "Action must be 'approve' or 'reject'." });
     }
 
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(id);
     if (!user) {
       return res.status(404).json({ error: 'User not found.' });
     }
 
     const newStatus = action === 'approve' ? 'approved' : 'rejected';
-    db.prepare('UPDATE users SET status = ?, updated_at = datetime(\'now\') WHERE id = ?').run(newStatus, id);
+    await db.prepare('UPDATE users SET status = ?, updated_at = datetime(\'now\') WHERE id = ?').run(newStatus, id);
 
     // Create user notification
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO notifications (id, user_id, type, title, message, link)
       VALUES (?, ?, 'account', ?, ?, ?)
     `).run(
@@ -147,7 +163,7 @@ async function handleRegistrationAction(req, res, next) {
     );
 
     // Audit log
-    logAudit(
+    await logAudit(
       req.user.id,
       action === 'approve' ? 'APPROVE_USER' : 'REJECT_USER',
       'user',
@@ -181,7 +197,7 @@ async function handleRegistrationAction(req, res, next) {
  * GET /api/admin/students
  * List all students with search & status filters
  */
-router.get('/students', (req, res, next) => {
+router.get('/students', async (req, res, next) => {
   try {
     const { status, search, page = 1, limit = 20 } = req.query;
     const db = getDb();
@@ -204,7 +220,8 @@ router.get('/students', (req, res, next) => {
     const whereClause = whereConditions.join(' AND ');
 
     const countStmt = db.prepare(`SELECT COUNT(*) as total FROM users WHERE ${whereClause}`);
-    const total = countStmt.get(...params).total;
+    const countRow = await countStmt.get(...params);
+    const total = countRow ? parseInt(countRow.total, 10) : 0;
 
     const studentsStmt = db.prepare(`
       SELECT id, email, full_name, role, status, semester, department, total_points, study_streak, last_active_date, created_at
@@ -214,7 +231,7 @@ router.get('/students', (req, res, next) => {
       LIMIT ? OFFSET ?
     `);
 
-    const students = studentsStmt.all(...params, l, o);
+    const students = await studentsStmt.all(...params, l, o);
 
     return res.status(200).json({
       success: true,
@@ -235,17 +252,17 @@ router.get('/students', (req, res, next) => {
  * GET /api/admin/students/:id
  * Detailed student profile + history
  */
-router.get('/students/:id', (req, res, next) => {
+router.get('/students/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
     const db = getDb();
 
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(id);
     if (!user) {
       return res.status(404).json({ error: 'Student not found.' });
     }
 
-    const attempts = db.prepare(`
+    const attempts = await db.prepare(`
       SELECT a.*, c.title as challenge_title
       FROM quiz_attempts a
       LEFT JOIN mcq_challenges c ON a.challenge_id = c.id
@@ -254,7 +271,7 @@ router.get('/students/:id', (req, res, next) => {
       LIMIT 10
     `).all(id);
 
-    const sessions = db.prepare(`
+    const sessions = await db.prepare(`
       SELECT id, device_info, ip_address, is_active, created_at, expires_at
       FROM sessions
       WHERE user_id = ?
@@ -262,7 +279,7 @@ router.get('/students/:id', (req, res, next) => {
       LIMIT 10
     `).all(id);
 
-    const auditLogs = db.prepare(`
+    const auditLogs = await db.prepare(`
       SELECT * FROM audit_logs
       WHERE target_id = ? OR (target_type = 'user' AND target_id = ?)
       ORDER BY created_at DESC
@@ -285,7 +302,7 @@ router.get('/students/:id', (req, res, next) => {
  * PUT /api/admin/students/:id/status
  * Suspend, reactivate or update status
  */
-router.put('/students/:id/status', (req, res, next) => {
+router.put('/students/:id/status', async (req, res, next) => {
   try {
     const { id } = req.params;
     const { status, reason } = req.body;
@@ -295,24 +312,24 @@ router.put('/students/:id/status', (req, res, next) => {
       return res.status(400).json({ error: 'Invalid status.' });
     }
 
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(id);
     if (!user) {
       return res.status(404).json({ error: 'Student not found.' });
     }
 
-    // Do not allow suspending fellow permanent admins
+    // Do not allow modifying status of permanent admins
     if (user.role === 'admin') {
       return res.status(403).json({ error: 'Cannot modify status of an administrator.' });
     }
 
-    db.prepare('UPDATE users SET status = ?, updated_at = datetime(\'now\') WHERE id = ?').run(status, id);
+    await db.prepare('UPDATE users SET status = ?, updated_at = datetime(\'now\') WHERE id = ?').run(status, id);
 
     // If suspended, deactivate all active sessions immediately
     if (status === 'suspended') {
-      db.prepare('UPDATE sessions SET is_active = 0 WHERE user_id = ?').run(id);
+      await db.prepare('UPDATE sessions SET is_active = 0 WHERE user_id = ?').run(id);
     }
 
-    logAudit(req.user.id, `UPDATE_STATUS_${status.toUpperCase()}`, 'user', id, { email: user.email, reason }, req);
+    await logAudit(req.user.id, `UPDATE_STATUS_${status.toUpperCase()}`, 'user', id, { email: user.email, reason }, req);
 
     return res.status(200).json({
       success: true,
@@ -327,13 +344,13 @@ router.put('/students/:id/status', (req, res, next) => {
 /**
  * DELETE /api/admin/sessions/user/:userId
  */
-router.delete('/sessions/user/:userId', (req, res, next) => {
+router.delete('/sessions/user/:userId', async (req, res, next) => {
   req.params.id = req.params.userId;
   try {
     const { id } = req.params;
     const db = getDb();
-    const info = db.prepare('UPDATE sessions SET is_active = 0 WHERE user_id = ?').run(id);
-    logAudit(req.user.id, 'REVOKE_USER_SESSIONS', 'user', id, { count: info.changes }, req);
+    const info = await db.prepare('UPDATE sessions SET is_active = 0 WHERE user_id = ?').run(id);
+    await logAudit(req.user.id, 'REVOKE_USER_SESSIONS', 'user', id, { count: info.changes }, req);
     return res.status(200).json({
       success: true,
       message: `Revoked ${info.changes} active session(s).`,
@@ -347,13 +364,13 @@ router.delete('/sessions/user/:userId', (req, res, next) => {
  * DELETE /api/admin/students/:id/sessions
  * Revoke all sessions for a student
  */
-router.delete('/students/:id/sessions', (req, res, next) => {
+router.delete('/students/:id/sessions', async (req, res, next) => {
   try {
     const { id } = req.params;
     const db = getDb();
 
-    const info = db.prepare('UPDATE sessions SET is_active = 0 WHERE user_id = ?').run(id);
-    logAudit(req.user.id, 'REVOKE_USER_SESSIONS', 'user', id, { count: info.changes }, req);
+    const info = await db.prepare('UPDATE sessions SET is_active = 0 WHERE user_id = ?').run(id);
+    await logAudit(req.user.id, 'REVOKE_USER_SESSIONS', 'user', id, { count: info.changes }, req);
 
     return res.status(200).json({
       success: true,
@@ -367,7 +384,7 @@ router.delete('/students/:id/sessions', (req, res, next) => {
 /**
  * GET /api/admin/audit-logs
  */
-router.get('/audit-logs', (req, res, next) => {
+router.get('/audit-logs', async (req, res, next) => {
   try {
     const { page = 1, limit = 30, action } = req.query;
     const db = getDb();
@@ -381,9 +398,10 @@ router.get('/audit-logs', (req, res, next) => {
       params.push(`%${action}%`);
     }
 
-    const total = db.prepare(`SELECT COUNT(*) as total FROM audit_logs a ${whereClause}`).get(...params).total;
+    const countRow = await db.prepare(`SELECT COUNT(*) as total FROM audit_logs a ${whereClause}`).get(...params);
+    const total = countRow ? parseInt(countRow.total, 10) : 0;
 
-    const logs = db.prepare(`
+    const logs = await db.prepare(`
       SELECT a.*, u.full_name as admin_name, u.email as admin_email
       FROM audit_logs a
       LEFT JOIN users u ON a.admin_id = u.id
@@ -410,7 +428,7 @@ router.get('/audit-logs', (req, res, next) => {
 /**
  * POST /api/admin/announcements
  */
-router.post('/announcements', (req, res, next) => {
+router.post('/announcements', async (req, res, next) => {
   try {
     const { title, content, priority = 'normal', expiresAt } = req.body;
     if (!title || !content) {
@@ -420,23 +438,23 @@ router.post('/announcements', (req, res, next) => {
     const db = getDb();
     const announcementId = generateId();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO announcements (id, title, content, priority, created_by, expires_at)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(announcementId, title.trim(), content.trim(), priority, req.user.id, expiresAt || null);
 
     // Notify all approved students
-    const students = db.prepare("SELECT id FROM users WHERE status = 'approved'").all();
+    const students = await db.prepare("SELECT id FROM users WHERE status = 'approved'").all();
     const notifyStmt = db.prepare(`
       INSERT INTO notifications (id, user_id, type, title, message, link)
       VALUES (?, ?, 'announcement', ?, ?, '/dashboard')
     `);
 
     for (const student of students) {
-      notifyStmt.run(generateId(), student.id, `📢 ${title}`, content.slice(0, 100));
+      await notifyStmt.run(generateId(), student.id, `📢 ${title}`, content.slice(0, 100));
     }
 
-    logAudit(req.user.id, 'CREATE_ANNOUNCEMENT', 'announcement', announcementId, { title, priority }, req);
+    await logAudit(req.user.id, 'CREATE_ANNOUNCEMENT', 'announcement', announcementId, { title, priority }, req);
 
     return res.status(201).json({
       success: true,
@@ -451,10 +469,10 @@ router.post('/announcements', (req, res, next) => {
 /**
  * GET /api/admin/announcements
  */
-router.get('/announcements', (req, res, next) => {
+router.get('/announcements', async (req, res, next) => {
   try {
     const db = getDb();
-    const announcements = db.prepare(`
+    const announcements = await db.prepare(`
       SELECT a.*, u.full_name as author_name
       FROM announcements a
       LEFT JOIN users u ON a.created_by = u.id
@@ -470,13 +488,13 @@ router.get('/announcements', (req, res, next) => {
 /**
  * PUT /api/admin/announcements/:id
  */
-router.put('/announcements/:id', (req, res, next) => {
+router.put('/announcements/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
     const { title, content, priority, isActive } = req.body;
     const db = getDb();
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE announcements
       SET title = COALESCE(?, title),
           content = COALESCE(?, content),
@@ -485,7 +503,7 @@ router.put('/announcements/:id', (req, res, next) => {
       WHERE id = ?
     `).run(title, content, priority, isActive !== undefined ? (isActive ? 1 : 0) : null, id);
 
-    logAudit(req.user.id, 'UPDATE_ANNOUNCEMENT', 'announcement', id, { title }, req);
+    await logAudit(req.user.id, 'UPDATE_ANNOUNCEMENT', 'announcement', id, { title }, req);
 
     return res.status(200).json({ success: true, message: 'Announcement updated.' });
   } catch (err) {
@@ -496,12 +514,12 @@ router.put('/announcements/:id', (req, res, next) => {
 /**
  * DELETE /api/admin/announcements/:id
  */
-router.delete('/announcements/:id', (req, res, next) => {
+router.delete('/announcements/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
     const db = getDb();
-    db.prepare('DELETE FROM announcements WHERE id = ?').run(id);
-    logAudit(req.user.id, 'DELETE_ANNOUNCEMENT', 'announcement', id, null, req);
+    await db.prepare('DELETE FROM announcements WHERE id = ?').run(id);
+    await logAudit(req.user.id, 'DELETE_ANNOUNCEMENT', 'announcement', id, null, req);
     return res.status(200).json({ success: true, message: 'Announcement removed.' });
   } catch (err) {
     next(err);
@@ -511,10 +529,10 @@ router.delete('/announcements/:id', (req, res, next) => {
 /**
  * GET /api/admin/settings
  */
-router.get('/settings', (req, res, next) => {
+router.get('/settings', async (req, res, next) => {
   try {
     const db = getDb();
-    const rows = db.prepare('SELECT key, value FROM platform_settings').all();
+    const rows = await db.prepare('SELECT key, value FROM platform_settings').all();
     const settings = {};
     for (const r of rows) {
       settings[r.key] = r.value;
@@ -528,7 +546,7 @@ router.get('/settings', (req, res, next) => {
 /**
  * PUT /api/admin/settings
  */
-router.put('/settings', (req, res, next) => {
+router.put('/settings', async (req, res, next) => {
   try {
     const settings = req.body;
     const db = getDb();
@@ -539,14 +557,11 @@ router.put('/settings', (req, res, next) => {
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
     `);
 
-    const updateTx = db.transaction(() => {
-      for (const [k, v] of Object.entries(settings)) {
-        upsertStmt.run(k, String(v));
-      }
-    });
+    for (const [k, v] of Object.entries(settings)) {
+      await upsertStmt.run(k, String(v));
+    }
 
-    updateTx();
-    logAudit(req.user.id, 'UPDATE_SETTINGS', 'platform_settings', null, settings, req);
+    await logAudit(req.user.id, 'UPDATE_SETTINGS', 'platform_settings', null, settings, req);
 
     return res.status(200).json({ success: true, message: 'Platform settings saved.' });
   } catch (err) {
@@ -557,10 +572,10 @@ router.put('/settings', (req, res, next) => {
 /**
  * GET /api/admin/sessions
  */
-router.get('/sessions', (req, res, next) => {
+router.get('/sessions', async (req, res, next) => {
   try {
     const db = getDb();
-    const sessions = db.prepare(`
+    const sessions = await db.prepare(`
       SELECT s.id, s.user_id, s.device_info, s.ip_address, s.is_active, s.created_at, s.expires_at,
              u.full_name, u.email, u.role
       FROM sessions s
@@ -579,12 +594,12 @@ router.get('/sessions', (req, res, next) => {
 /**
  * DELETE /api/admin/sessions/:id
  */
-router.delete('/sessions/:id', (req, res, next) => {
+router.delete('/sessions/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
     const db = getDb();
-    db.prepare('UPDATE sessions SET is_active = 0 WHERE id = ?').run(id);
-    logAudit(req.user.id, 'REVOKE_SESSION', 'session', id, null, req);
+    await db.prepare('UPDATE sessions SET is_active = 0 WHERE id = ?').run(id);
+    await logAudit(req.user.id, 'REVOKE_SESSION', 'session', id, null, req);
     return res.status(200).json({ success: true, message: 'Session terminated.' });
   } catch (err) {
     next(err);

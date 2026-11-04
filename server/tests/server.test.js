@@ -66,16 +66,17 @@ test('Database migrations create all required tables', () => {
   }
 });
 
-test('Default channels and semesters are seeded', () => {
+test('Default channels and semesters are seeded', async () => {
   const { getDb } = require('../database/db');
   const db = getDb();
 
-  const channels = db.prepare('SELECT name FROM community_channels').all().map((c) => c.name.toLowerCase());
-  assert.strictEqual(channels.includes('general'), true);
+  const channels = (await db.prepare('SELECT name FROM community_channels').all()).map((c) => c.name.toLowerCase());
   assert.strictEqual(channels.includes('announcements'), true);
-  assert.strictEqual(channels.includes('programming'), true);
+  assert.strictEqual(channels.includes('exam discussion'), true);
+  assert.strictEqual(channels.includes('notes & resources'), true);
+  assert.strictEqual(channels.length, 3);
 
-  const semesters = db.prepare('SELECT COUNT(*) as count FROM semesters').get().count;
+  const semesters = (await db.prepare('SELECT COUNT(*) as count FROM semesters').get()).count;
   assert.strictEqual(semesters >= 8, true);
 });
 

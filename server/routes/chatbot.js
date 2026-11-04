@@ -1,5 +1,6 @@
 // =============================================================================
 // TopperBatch - AI Chatbot & High-Performance RAG Routes (with Streaming)
+// Production-Ready: Supabase PostgreSQL & Gemini 3.5 Flash Lite
 // =============================================================================
 
 const express = require('express');
@@ -31,7 +32,7 @@ async function buildRAGContext(db, query, documentId) {
 
       for (const chunk of relevantChunks) {
         if (!docCache.has(chunk.document_id)) {
-          const doc = db.prepare('SELECT title, original_name FROM documents WHERE id = ?').get(chunk.document_id);
+          const doc = await db.prepare('SELECT title, original_name FROM documents WHERE id = ?').get(chunk.document_id);
           docCache.set(chunk.document_id, doc ? (doc.title || doc.original_name) : 'Question Bank PDF');
         }
       }
@@ -61,10 +62,10 @@ async function buildRAGContext(db, query, documentId) {
  * GET /api/chatbot/conversations
  * List user's conversations
  */
-router.get('/conversations', (req, res, next) => {
+router.get('/conversations', async (req, res, next) => {
   try {
     const db = getDb();
-    const conversations = db.prepare(`
+    const conversations = await db.prepare(`
       SELECT c.*, d.title as document_title, d.original_name as document_filename
       FROM chat_conversations c
       LEFT JOIN documents d ON c.document_id = d.id
@@ -82,7 +83,7 @@ router.get('/conversations', (req, res, next) => {
  * POST /api/chatbot/conversations
  * Start a new chat session
  */
-router.post('/conversations', (req, res, next) => {
+router.post('/conversations', async (req, res, next) => {
   try {
     const { title, document_id } = req.body;
     const db = getDb();
@@ -90,13 +91,13 @@ router.post('/conversations', (req, res, next) => {
 
     let docTitle = null;
     if (document_id) {
-      const doc = db.prepare('SELECT title FROM documents WHERE id = ?').get(document_id);
+      const doc = await db.prepare('SELECT title FROM documents WHERE id = ?').get(document_id);
       if (doc) docTitle = doc.title;
     }
 
     const defaultTitle = docTitle ? `Discussion: ${docTitle}` : 'New AI Session';
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO chat_conversations (id, user_id, title, document_id)
       VALUES (?, ?, ?, ?)
     `).run(convId, req.user.id, (title || defaultTitle).slice(0, 100), document_id || null);
@@ -118,12 +119,12 @@ router.post('/conversations', (req, res, next) => {
  * GET /api/chatbot/conversations/:id
  * Get full conversation history
  */
-router.get('/conversations/:id', (req, res, next) => {
+router.get('/conversations/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
     const db = getDb();
 
-    const conv = db.prepare(`
+    const conv = await db.prepare(`
       SELECT c.*, d.title as document_title, d.original_name as document_filename
       FROM chat_conversations c
       LEFT JOIN documents d ON c.document_id = d.id
@@ -134,7 +135,7 @@ router.get('/conversations/:id', (req, res, next) => {
       return res.status(404).json({ error: 'Conversation not found.' });
     }
 
-    const messages = db.prepare(`
+    const messages = await db.prepare(`
       SELECT * FROM chat_messages
       WHERE conversation_id = ?
       ORDER BY created_at ASC
@@ -169,7 +170,7 @@ router.post('/conversations/:id/messages', async (req, res, next) => {
     }
 
     const db = getDb();
-    const conv = db.prepare('SELECT * FROM chat_conversations WHERE id = ? AND user_id = ?').get(id, req.user.id);
+    const conv = await db.prepare('SELECT * FROM chat_conversations WHERE id = ? AND user_id = ?').get(id, req.user.id);
     if (!conv) {
       return res.status(404).json({ error: 'Conversation not found.' });
     }
@@ -178,20 +179,20 @@ router.post('/conversations/:id/messages', async (req, res, next) => {
 
     // Save user message
     const userMsgId = generateId();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO chat_messages (id, conversation_id, role, content)
       VALUES (?, ?, 'user', ?)
     `).run(userMsgId, id, content.trim());
 
-    db.prepare("UPDATE chat_conversations SET updated_at = datetime('now') WHERE id = ?").run(id);
+    await db.prepare("UPDATE chat_conversations SET updated_at = datetime('now') WHERE id = ?").run(id);
 
     // Context from previous turns
-    const historyRows = db.prepare(`
+    const historyRows = (await db.prepare(`
       SELECT role, content FROM chat_messages
       WHERE conversation_id = ? AND id != ?
       ORDER BY created_at DESC
       LIMIT 6
-    `).all(id, userMsgId).reverse();
+    `).all(id, userMsgId)).reverse();
 
     // RAG Search
     const { contextText, sources } = await buildRAGContext(db, content.trim(), activeDocId);
@@ -201,7 +202,7 @@ router.post('/conversations/:id/messages', async (req, res, next) => {
 
     // Save assistant message
     const assistantMsgId = generateId();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO chat_messages (id, conversation_id, role, content, sources)
       VALUES (?, ?, 'assistant', ?, ?)
     `).run(assistantMsgId, id, aiResponseText, JSON.stringify(sources));
@@ -235,7 +236,7 @@ router.post('/conversations/:id/messages/stream', async (req, res) => {
   }
 
   const db = getDb();
-  const conv = db.prepare('SELECT * FROM chat_conversations WHERE id = ? AND user_id = ?').get(id, req.user.id);
+  const conv = await db.prepare('SELECT * FROM chat_conversations WHERE id = ? AND user_id = ?').get(id, req.user.id);
   if (!conv) {
     return res.status(404).json({ error: 'Conversation not found.' });
   }
@@ -244,20 +245,20 @@ router.post('/conversations/:id/messages/stream', async (req, res) => {
 
   // Save user message
   const userMsgId = generateId();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO chat_messages (id, conversation_id, role, content)
     VALUES (?, ?, 'user', ?)
   `).run(userMsgId, id, content.trim());
 
-  db.prepare("UPDATE chat_conversations SET updated_at = datetime('now') WHERE id = ?").run(id);
+  await db.prepare("UPDATE chat_conversations SET updated_at = datetime('now') WHERE id = ?").run(id);
 
   // Retrieve context
-  const historyRows = db.prepare(`
+  const historyRows = (await db.prepare(`
     SELECT role, content FROM chat_messages
     WHERE conversation_id = ? AND id != ?
     ORDER BY created_at DESC
     LIMIT 6
-  `).all(id, userMsgId).reverse();
+  `).all(id, userMsgId)).reverse();
 
   // Set SSE Headers
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -282,7 +283,7 @@ router.post('/conversations/:id/messages/stream', async (req, res) => {
     }
 
     // Save complete message into DB
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO chat_messages (id, conversation_id, role, content, sources)
       VALUES (?, ?, 'assistant', ?, ?)
     `).run(assistantMsgId, id, completeAssistantResponse, JSON.stringify(sources));
@@ -309,11 +310,11 @@ router.post('/conversations/:id/messages/stream', async (req, res) => {
 /**
  * DELETE /api/chatbot/conversations/:id
  */
-router.delete('/conversations/:id', (req, res, next) => {
+router.delete('/conversations/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
     const db = getDb();
-    db.prepare('DELETE FROM chat_conversations WHERE id = ? AND user_id = ?').run(id, req.user.id);
+    await db.prepare('DELETE FROM chat_conversations WHERE id = ? AND user_id = ?').run(id, req.user.id);
     return res.status(200).json({ success: true, message: 'Conversation deleted.' });
   } catch (err) {
     next(err);

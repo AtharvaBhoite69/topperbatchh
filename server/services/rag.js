@@ -82,13 +82,13 @@ function splitIntoChunks(text, chunkSize = 1200, overlap = 150) {
 async function indexDocument(documentId, force = false) {
   const db = getDb();
 
-  const document = db.prepare('SELECT * FROM documents WHERE id = ?').get(documentId);
+  const document = await db.prepare('SELECT * FROM documents WHERE id = ?').get(documentId);
   if (!document) {
     throw new Error(`Document not found: ${documentId}`);
   }
 
   if (document.is_indexed && !force) {
-    const existingChunks = db.prepare('SELECT COUNT(*) as c FROM document_chunks WHERE document_id = ?').get(documentId);
+    const existingChunks = await db.prepare('SELECT COUNT(*) as c FROM document_chunks WHERE document_id = ?').get(documentId);
     if (existingChunks && existingChunks.c > 0) {
       console.log(`ℹ️ Document ${documentId} is already indexed (${existingChunks.c} chunks).`);
       return;
@@ -96,7 +96,7 @@ async function indexDocument(documentId, force = false) {
   }
 
   // Get document pages
-  const pages = db.prepare(
+  const pages = await db.prepare(
     'SELECT * FROM document_pages WHERE document_id = ? ORDER BY page_number ASC'
   ).all(documentId);
 
@@ -106,7 +106,7 @@ async function indexDocument(documentId, force = false) {
   }
 
   // Delete existing chunks if re-indexing
-  db.prepare('DELETE FROM document_chunks WHERE document_id = ?').run(documentId);
+  await db.prepare('DELETE FROM document_chunks WHERE document_id = ?').run(documentId);
 
   const insertChunk = db.prepare(`
     INSERT INTO document_chunks (id, document_id, page_number, chunk_index, content, embedding)
@@ -148,17 +148,13 @@ async function indexDocument(documentId, force = false) {
     chunk.embedding = embeddingStr;
   }
 
-  // Insert all chunks in a transaction
-  const insertMany = db.transaction((chunks) => {
-    for (const c of chunks) {
-      insertChunk.run(c.id, c.document_id, c.page_number, c.chunk_index, c.content, c.embedding);
-    }
-  });
-
-  insertMany(allChunks);
+  // Insert all chunks
+  for (const c of allChunks) {
+    await insertChunk.run(c.id, c.document_id, c.page_number, c.chunk_index, c.content, c.embedding);
+  }
 
   // Mark document as indexed
-  db.prepare('UPDATE documents SET is_indexed = 1 WHERE id = ?').run(documentId);
+  await db.prepare('UPDATE documents SET is_indexed = 1 WHERE id = ?').run(documentId);
 
   console.log(`✅ Indexed document "${document.title}": ${allChunks.length} chunks with page references.`);
 }
@@ -180,7 +176,7 @@ async function searchRelevantChunks(query, documentId = null, topK = 5) {
 
   // If no document selected, check if user mentioned a document title or topic in query
   if (!targetDocId) {
-    const allDocs = db.prepare('SELECT id, title, topic FROM documents').all();
+    const allDocs = await db.prepare('SELECT id, title, topic FROM documents').all();
     for (const doc of allDocs) {
       const titleTerms = (doc.title || '').toLowerCase().split(/[\s_\-\.]+/).filter((t) => t.length > 3);
       if (titleTerms.some((term) => query.toLowerCase().includes(term))) {
@@ -193,12 +189,12 @@ async function searchRelevantChunks(query, documentId = null, topK = 5) {
   // Fetch candidate chunks from DB
   let chunks;
   if (targetDocId) {
-    chunks = db.prepare(
+    chunks = await db.prepare(
       'SELECT id, document_id, page_number, chunk_index, content, embedding FROM document_chunks WHERE document_id = ?'
     ).all(targetDocId);
   } else {
     // Top 300 most recent chunks if global
-    chunks = db.prepare(
+    chunks = await db.prepare(
       'SELECT id, document_id, page_number, chunk_index, content, embedding FROM document_chunks ORDER BY created_at DESC LIMIT 300'
     ).all();
   }

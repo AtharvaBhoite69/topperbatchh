@@ -1,5 +1,6 @@
 // =============================================================================
 // TopperBatch - Global Search Routes
+// Production-Ready: Supabase PostgreSQL
 // =============================================================================
 
 const express = require('express');
@@ -14,7 +15,7 @@ router.use(authenticate, requireApproved);
  * GET /api/search
  * Global search across documents, community messages, announcements, and students
  */
-router.get('/', (req, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
     const { q, type } = req.query;
 
@@ -32,7 +33,7 @@ router.get('/', (req, res, next) => {
 
     // Search Documents
     if (!type || type === 'documents' || type === 'all') {
-      results.documents = db.prepare(`
+      results.documents = await db.prepare(`
         SELECT d.id, d.title, d.description, d.topic, s.name as subject_name, sem.name as semester_name
         FROM documents d
         LEFT JOIN subjects s ON d.subject_id = s.id
@@ -44,7 +45,7 @@ router.get('/', (req, res, next) => {
 
     // Search Discussions
     if (!type || type === 'discussions' || type === 'all') {
-      results.discussions = db.prepare(`
+      results.discussions = await db.prepare(`
         SELECT m.id, m.content, m.created_at, c.id as channel_id, c.name as channel_name, u.full_name as author_name
         FROM community_messages m
         JOIN community_channels c ON m.channel_id = c.id
@@ -56,7 +57,7 @@ router.get('/', (req, res, next) => {
 
     // Search Announcements
     if (!type || type === 'announcements' || type === 'all') {
-      results.announcements = db.prepare(`
+      results.announcements = await db.prepare(`
         SELECT id, title, content, priority, created_at
         FROM announcements
         WHERE is_active = 1 AND (title LIKE ? OR content LIKE ?)
@@ -66,7 +67,7 @@ router.get('/', (req, res, next) => {
 
     // Search Students (Approved only)
     if (!type || type === 'students' || type === 'all') {
-      results.students = db.prepare(`
+      results.students = await db.prepare(`
         SELECT id, full_name, avatar_url, semester, department, total_points
         FROM users
         WHERE status = 'approved' AND role = 'student' AND (full_name LIKE ? OR department LIKE ?)
@@ -81,4 +82,3 @@ router.get('/', (req, res, next) => {
 });
 
 module.exports = router;
-

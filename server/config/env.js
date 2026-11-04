@@ -37,7 +37,13 @@ const env = {
   // Admin emails
   ADMIN_EMAILS,
 
-  // Database path
+  // Database & Supabase
+  DATABASE_URL: process.env.DATABASE_URL || '',
+  SUPABASE_URL: process.env.SUPABASE_URL || '',
+  SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY || '',
+  SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+
+  // Database path (SQLite fallback)
   DB_PATH: process.env.DB_PATH || (process.env.VERCEL ? '/tmp/topperbatch.db' : path.join(__dirname, '..', 'topperbatch.db')),
 };
 
@@ -49,6 +55,12 @@ function validateEnv() {
   if (!env.JWT_SECRET) {
     env.JWT_SECRET = 'topperbatch-permanent-production-secret-2024-jwt-key';
     console.warn('⚠️  JWT_SECRET not provided, using fallback key.');
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    if (!env.DATABASE_URL) {
+      console.warn('⚠️  DATABASE_URL is not set for production. Ensure Supabase PostgreSQL connection string is supplied on Vercel.');
+    }
   }
 
   // Warn about optional but recommended variables

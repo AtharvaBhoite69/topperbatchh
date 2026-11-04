@@ -1,7 +1,7 @@
 # 💥 TOPPERBATCH — ISS SEM, 9 POINTER FIX! 💥
 
 > **Your Batch. Your Rules.**  
-> A private, high-performance college student community combining question banks, RAG-grounded Gemini AI, daily MCQ battle competitions, Discord-style channel discussions, and live leaderboards.
+> A private, high-performance college student community combining question banks, RAG-grounded Gemini AI, daily MCQ battle competitions, Supabase Realtime live chat, and leaderboards.
 
 ---
 
@@ -20,7 +20,7 @@ TopperBatch is designed with a **Retro Comic Book + Street Art + Vintage Gaming*
 
 ## 🛡️ Permanent Administrators
 
-As mandated by the security specification, permanent administrator privileges are strictly controlled server-side:
+Permanent administrator privileges are strictly controlled server-side:
 
 ```env
 ADMIN_EMAIL_1=parthkadu05@gmail.com
@@ -37,125 +37,90 @@ ADMIN_EMAIL_2=atharvabhoite697@gmail.com
 
 1. **Student Command Post (Dashboard)**:
    - Personalized greeting, daily study streak, total batch points, and rank.
-   - 10 Comic Quick-Access Cards linking directly to active features.
+   - Comic quick-access cards linking directly to active features.
    - Official batch broadcast notifications and today's active MCQ battle banner.
 
 2. **Question Bank Vault & Protected Viewer**:
    - Filterable by semester, subject, and unit.
-   - Protected inline PDF streaming with **student-specific watermarks** (`email`, `name`, `timestamp`) to deter screenshots and leaks.
+   - Supabase Private Storage integration with 1-hour short-lived signed URLs.
+   - Protected inline PDF streaming with **student-specific watermarks** (`email`, `name`, `timestamp`) to deter leaks.
    - Right-click and text-selection deterrents.
 
-3. **Gemini 1.5 Flash RAG AI Study Buddy**:
-   - Split-screen chat interface with session history.
-   - Grounded PDF answering: extracts text, generates vector embeddings, retrieves top-5 relevant chunks, and cites exact PDF title and page numbers.
+3. **Gemini 3.5 Flash Lite RAG AI Study Buddy**:
+   - Split-screen chat interface with session history and high-speed SSE streaming.
+   - Grounded PDF answering: extracts true per-page text, creates semantic chunks, and cites exact PDF title and page numbers.
    - Pre-loaded high-yield prompts for quick exam preparation.
 
-4. **Daily MCQ Battle Arena & Leaderboard**:
-   - Daily 10-question timed challenge.
-   - Server-side scoring: `+10 points` per correct answer, `+5 participation bonus`.
+4. **Admin-Only AI PDF-to-MCQ Generator**:
+   - Administrators can upload any question bank PDF or select a vault document.
+   - Generates high-accuracy 4-option MCQs citing exact source PDF and page number.
+   - Full review & edit interface: edit text, swap answers, regenerate individual questions, and save drafts.
+   - One-click publish to the Daily MCQ Battle Challenge or save to Question Bank.
+
+5. **Daily MCQ Battle Arena & Leaderboard**:
+   - Daily timed challenge with server-side validation.
+   - Scoring: `+10 points` per correct answer, `+5 participation bonus`.
    - Single official attempt enforced per student per challenge.
-   - Daily, Weekly, and All-Time Leaderboards with top 3 podium display and tiebreakers on time and accuracy.
+   - Daily, Weekly, and All-Time Leaderboards with top 3 podium display.
 
-5. **Discord-Style Batch Community**:
-   - Real-time channels (`#general`, `#announcements`, `#exam-discussion`, `#programming`, `#dbms`, `#projects`, `#random`).
-   - Live socket messaging, typing indicators, emoji reaction counts, and reply threads.
-   - Student flag/report mechanism for administrator moderation.
-
-6. **Admin Command HQ**:
-   - Real database telemetry: total students, pending approvals, vault documents, quiz attempts, and active users.
-   - Student roster management (suspend, reactivate, revoke sessions).
-   - Document upload with automated RAG indexing pipeline.
-   - Question Forge (create MCQs with 4 options and detailed explanations).
-   - Battle Planner (schedule daily challenges and assign question pools).
-   - Control Room (single active session enforcement, scoring multipliers).
-   - Immutable audit trail logging admin actions and IP addresses.
+6. **Live Community Arena (Supabase Realtime)**:
+   - Exactly **three** official channels in strict order:
+     1. **#Announcements**: Official administrative broadcasts. Only permanent admins can post. Students can view announcements but cannot post, reply, or react.
+     2. **#Exam Discussion**: Live interactive channel where approved students and admins discuss exams, solve doubts, and collaborate with reactions and replies.
+     3. **#Notes & Resources**: Dedicated vault where approved students and admins share permitted notes, PDF attachments, and formula sheets.
+   - Instant live messaging powered by **Supabase Realtime Broadcast + PostgreSQL Changes** with automatic reconnection and fallback.
 
 ---
 
-## 🛠️ Tech Stack Architecture
+## 🏗️ Production Architecture: Vercel + Supabase
 
-- **Frontend**: React 18, Vite, Tailwind CSS v3, Lucide React, Socket.io-client, Axios, React Hot Toast
-- **Backend**: Node.js, Express, Socket.io, Multer, Helmet, CORS, Cookie-Parser, Express-Rate-Limit, Node-Cron
-- **Database**: SQLite with `better-sqlite3` (WAL mode enabled, foreign keys enforced, indexed queries)
-- **AI Engine**: Google Gemini API (`gemini-1.5-flash` & `text-embedding-004`) via RAG pipeline
-- **Auth**: JWT stored in `httpOnly`, `SameSite=Lax` cookies with server-side session tracking and revocation
+- **Hosting & API**: Vercel Serverless Functions (`api/index.js`, `vercel.json`).
+- **Database**: Supabase PostgreSQL with pooled connections (`pg.Pool` with SSL).
+- **Realtime Delivery**: Supabase Realtime for instant, multi-student chat on serverless infrastructure.
+- **Document Storage**: Supabase Private Storage (`documents` and `community_attachments` buckets).
+- **Local Development**: Dual-mode database adapter falls back to local SQLite (`node:sqlite DatabaseSync`) when `DATABASE_URL` is unset.
 
 ---
 
-## ⚡ Quick Start & Local Setup
+## ⚡ Quick Start & Deployment Guide
 
-### 1. Prerequisites
-- Node.js >= 18.0.0
-- npm >= 9.0.0
+### 1. Supabase Setup
+1. Create a new project in [Supabase](https://supabase.com).
+2. Go to **Project Settings** -> **Database** and copy your Connection string (`DATABASE_URL`).
+3. Go to **Project Settings** -> **API** and copy `Project URL`, `anon public` key, and `service_role` key.
+4. Run the automated database migration script:
+   ```bash
+   npm run migrate:supabase
+   ```
+   *(This applies `supabase/schema.sql`, sets up all 28 tables, foreign keys, and enables Realtime publication on `community_messages` and `message_reactions`).*
+5. (Optional) Migrate existing local question bank PDFs to Supabase Storage:
+   ```bash
+   npm run migrate:storage
+   ```
 
-### 2. Configure Environment Variables
-Copy `.env.example` to `.env` in the root folder:
-
-```bash
-cp .env.example .env
-```
-
-Ensure your admin emails and optional Gemini API key are configured:
-```env
-PORT=5000
-NODE_ENV=development
-JWT_SECRET=topperbatch-super-secret-key-2026
-ADMIN_EMAIL_1=parthkadu05@gmail.com
-ADMIN_EMAIL_2=atharvabhoite697@gmail.com
-GEMINI_API_KEY=your_gemini_api_key_here
-CLIENT_URL=http://localhost:5173
-```
-
-### 3. Install Dependencies
-```bash
-# Install backend dependencies
-cd server
-npm install
-
-# Install frontend dependencies
-cd ../client
-npm install
-```
-
-### 4. Run Database Migrations & Seeds
-```bash
-cd server
-npm run migrate
-npm run seed
-```
-
-### 5. Launch Development Servers
-Run both backend and frontend concurrently from root:
-```bash
-# In one terminal (or root)
-npm run dev
-```
-Or run separately:
-```bash
-# Terminal 1: Backend API (port 5000)
-cd server && npm run dev
-
-# Terminal 2: Frontend UI (port 5173)
-cd client && npm run dev
-```
-
-Visit `http://localhost:5173` in your browser.
+### 2. Vercel Deployment
+1. Import repository `https://github.com/AtharvaBhoite69/topperbatchh.git` into Vercel.
+2. In Project Settings -> **Environment Variables**, add:
+   ```env
+   NODE_ENV=production
+   JWT_SECRET=your-random-32-character-secret
+   ADMIN_EMAIL_1=parthkadu05@gmail.com
+   ADMIN_EMAIL_2=atharvabhoite697@gmail.com
+   DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres
+   SUPABASE_URL=https://[REF].supabase.co
+   SUPABASE_ANON_KEY=your-supabase-anon-key
+   SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
+   VITE_SUPABASE_URL=https://[REF].supabase.co
+   VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
+   GEMINI_API_KEY=your-gemini-api-key
+   ```
+3. Deploy! Vercel runs `npm run vercel-build` which compiles the Vite client and serves the backend serverless endpoints from `api/index.js`.
 
 ---
 
 ## 🧪 Automated Testing
-Run automated backend tests covering database schemas, table integrity, and admin email verification:
+Run automated backend verification tests:
 ```bash
-cd server
-npm test
+npm --prefix server test
 ```
-
----
-
-## 🔒 Security & Deterrent Architecture
-
-- **Private Document Delivery**: PDFs are never exposed via static public URLs. Every view request passes through `authenticate` + `requireApproved` middleware, validating the active JWT session cookie.
-- **Watermark Deterrents**: When a student opens a PDF, semi-transparent watermarks carrying their name and email are overlaid across the viewport.
-- **Device & Session Restrictions**: The administrator can set `max_sessions_per_user` (default `1`). When a student logs in on a new device, older sessions are automatically revoked.
-- **Server-Side Scoring**: Quiz scores, timers, and answer validations are computed entirely server-side. The frontend only receives option IDs and sends user selections.
-
+All tests verify database integrity, schemas, and permanent admin authorization.

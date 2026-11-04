@@ -1,6 +1,7 @@
 // =============================================================================
 // TopperBatch - Community & Channels Routes
 // Exactly Three Channels: Announcements, Exam Discussion, Notes & Resources
+// Production-Ready: Supabase PostgreSQL, Supabase Realtime, Supabase Storage
 // =============================================================================
 
 const express = require('express');
@@ -13,6 +14,12 @@ const { getDb } = require('../database/db');
 const { generateId, paginate } = require('../utils/helpers');
 const { authenticate, requireApproved, requireAdmin } = require('../middleware/auth');
 const env = require('../config/env');
+const {
+  uploadToStorage,
+  getSignedDownloadUrl,
+  BUCKET_COMMUNITY,
+  getSupabaseAdmin,
+} = require('../services/supabaseStorage');
 
 // Ensure community uploads folder exists (using /tmp on Vercel)
 const uploadsDir = process.env.VERCEL
@@ -57,14 +64,32 @@ const upload = multer({
   },
 });
 
-function logAdminAction(db, adminId, action, details) {
+async function logAdminAction(db, adminId, action, details) {
   try {
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO audit_logs (id, admin_id, action, details)
       VALUES (?, ?, ?, ?)
     `).run(generateId(), adminId, action, typeof details === 'string' ? details : JSON.stringify(details));
   } catch (err) {
     console.error('Audit log error:', err.message);
+  }
+}
+
+/**
+ * Broadcast message or reaction over Supabase Realtime if configured
+ */
+async function broadcastRealtime(channelId, event, payload) {
+  const supabase = getSupabaseAdmin();
+  if (supabase) {
+    try {
+      const channel = supabase.channel(`community-${channelId}`);
+      await channel.send({
+        type: 'broadcast',
+        event,
+        payload,
+      });
+      supabase.removeChannel(channel);
+    } catch (_) {}
   }
 }
 
@@ -75,10 +100,10 @@ router.use(authenticate, requireApproved);
  * GET /api/community/channels
  * List all 3 community channels strictly in display_order
  */
-router.get('/channels', (req, res, next) => {
+router.get('/channels', async (req, res, next) => {
   try {
     const db = getDb();
-    let channels = db.prepare(`
+    let channels = await db.prepare(`
       SELECT c.*,
              (SELECT COUNT(*) FROM community_messages m WHERE m.channel_id = c.id AND m.is_deleted = 0) as message_count
       FROM community_channels c
@@ -89,7 +114,7 @@ router.get('/channels', (req, res, next) => {
     if (!channels || channels.length === 0) {
       const { seedDatabase } = require('../database/seed');
       seedDatabase();
-      channels = db.prepare(`
+      channels = await db.prepare(`
         SELECT c.*,
                (SELECT COUNT(*) FROM community_messages m WHERE m.channel_id = c.id AND m.is_deleted = 0) as message_count
         FROM community_channels c
@@ -107,7 +132,7 @@ router.get('/channels', (req, res, next) => {
  * GET /api/community/channels/:id/messages
  * Get paginated messages for a channel
  */
-router.get('/channels/:id/messages', (req, res, next) => {
+router.get('/channels/:id/messages', async (req, res, next) => {
   try {
     const { id } = req.params;
     const { page = 1, limit = 50 } = req.query;
@@ -115,12 +140,12 @@ router.get('/channels/:id/messages', (req, res, next) => {
     const { limit: l, offset: o } = paginate(page, limit);
 
     // Verify channel exists
-    const channel = db.prepare('SELECT * FROM community_channels WHERE id = ?').get(id);
+    const channel = await db.prepare('SELECT * FROM community_channels WHERE id = ?').get(id);
     if (!channel) {
       return res.status(404).json({ error: 'Channel not found.' });
     }
 
-    const messages = db.prepare(`
+    const messages = await db.prepare(`
       SELECT m.*, u.full_name as author_name, u.avatar_url as author_avatar, u.role as author_role, u.email as author_email,
              reply_user.full_name as reply_to_author, reply_msg.content as reply_to_snippet
       FROM community_messages m
@@ -138,7 +163,7 @@ router.get('/channels/:id/messages', (req, res, next) => {
 
     if (messageIds.length > 0) {
       const placeholders = messageIds.map(() => '?').join(',');
-      const reactions = db.prepare(`
+      const reactions = await db.prepare(`
         SELECT r.message_id, r.emoji, r.user_id, u.full_name
         FROM message_reactions r
         JOIN users u ON r.user_id = u.id
@@ -177,7 +202,7 @@ router.get('/channels/:id/messages', (req, res, next) => {
  * POST /api/community/channels/:id/messages
  * Send a message to a channel (with strict Announcements permissions enforcement)
  */
-router.post('/channels/:id/messages', (req, res, next) => {
+router.post('/channels/:id/messages', async (req, res, next) => {
   try {
     const { id } = req.params;
     const { content, reply_to_id, attachment_url, attachment_name, attachment_size, attachment_type } = req.body;
@@ -187,7 +212,7 @@ router.post('/channels/:id/messages', (req, res, next) => {
     }
 
     const db = getDb();
-    const channel = db.prepare('SELECT * FROM community_channels WHERE id = ?').get(id);
+    const channel = await db.prepare('SELECT * FROM community_channels WHERE id = ?').get(id);
     if (!channel) {
       return res.status(404).json({ error: 'Channel not found.' });
     }
@@ -209,7 +234,7 @@ router.post('/channels/:id/messages', (req, res, next) => {
 
     const msgId = generateId();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO community_messages (
         id, channel_id, user_id, content, reply_to_id, attachment_url, attachment_name, attachment_size, attachment_type
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -225,7 +250,7 @@ router.post('/channels/:id/messages', (req, res, next) => {
       attachment_type || null
     );
 
-    const savedMessage = db.prepare(`
+    const savedMessage = await db.prepare(`
       SELECT m.*, u.full_name as author_name, u.avatar_url as author_avatar, u.role as author_role, u.email as author_email
       FROM community_messages m
       JOIN users u ON m.user_id = u.id
@@ -240,9 +265,12 @@ router.post('/channels/:id/messages', (req, res, next) => {
       io.to(id).emit('new_message', fullMessage);
     }
 
+    // Broadcast over Supabase Realtime
+    broadcastRealtime(id, 'new_message', fullMessage);
+
     // If admin posted an announcement, record in audit logs
     if (channel.name === 'Announcements') {
-      logAdminAction(db, req.user.id, 'create_announcement', {
+      await logAdminAction(db, req.user.id, 'create_announcement', {
         channel: channel.name,
         messageId: msgId,
         snippet: (content || '').slice(0, 100),
@@ -259,7 +287,7 @@ router.post('/channels/:id/messages', (req, res, next) => {
  * POST /api/community/channels/:id/upload
  * Upload a resource/attachment to a channel (Notes & Resources)
  */
-router.post('/channels/:id/upload', upload.single('file'), (req, res, next) => {
+router.post('/channels/:id/upload', upload.single('file'), async (req, res, next) => {
   try {
     const { id } = req.params;
     const { content } = req.body;
@@ -269,7 +297,7 @@ router.post('/channels/:id/upload', upload.single('file'), (req, res, next) => {
     }
 
     const db = getDb();
-    const channel = db.prepare('SELECT * FROM community_channels WHERE id = ?').get(id);
+    const channel = await db.prepare('SELECT * FROM community_channels WHERE id = ?').get(id);
     if (!channel) {
       return res.status(404).json({ error: 'Channel not found.' });
     }
@@ -284,11 +312,14 @@ router.post('/channels/:id/upload', upload.single('file'), (req, res, next) => {
       }
     }
 
+    // Upload to Supabase Storage if configured
+    await uploadToStorage(BUCKET_COMMUNITY, req.file.filename, req.file.path, req.file.mimetype);
+
     const msgId = generateId();
     const attachmentUrl = `/api/community/attachments/${req.file.filename}`;
     const messageContent = (content || `Shared resource: ${req.file.originalname}`).trim();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO community_messages (
         id, channel_id, user_id, content, attachment_url, attachment_name, attachment_size, attachment_type
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -303,7 +334,7 @@ router.post('/channels/:id/upload', upload.single('file'), (req, res, next) => {
       req.file.mimetype
     );
 
-    const savedMessage = db.prepare(`
+    const savedMessage = await db.prepare(`
       SELECT m.*, u.full_name as author_name, u.avatar_url as author_avatar, u.role as author_role, u.email as author_email
       FROM community_messages m
       JOIN users u ON m.user_id = u.id
@@ -318,6 +349,9 @@ router.post('/channels/:id/upload', upload.single('file'), (req, res, next) => {
       io.to(id).emit('new_message', fullMessage);
     }
 
+    // Broadcast over Supabase Realtime
+    broadcastRealtime(id, 'new_message', fullMessage);
+
     return res.status(201).json({ success: true, message: fullMessage });
   } catch (err) {
     next(err);
@@ -328,12 +362,19 @@ router.post('/channels/:id/upload', upload.single('file'), (req, res, next) => {
  * GET /api/community/attachments/:filename
  * Secure, authorized file delivery for shared community notes & resources
  */
-router.get('/attachments/:filename', (req, res, next) => {
+router.get('/attachments/:filename', async (req, res, next) => {
   try {
     const { filename } = req.params;
     const sanitized = path.basename(filename);
-    const filePath = path.join(uploadsDir, sanitized);
 
+    // 1. Try Supabase Storage Signed URL
+    const signedUrl = await getSignedDownloadUrl(BUCKET_COMMUNITY, sanitized, 3600);
+    if (signedUrl) {
+      return res.redirect(signedUrl);
+    }
+
+    // 2. Local Fallback
+    const filePath = path.join(uploadsDir, sanitized);
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: 'Requested file does not exist or has been removed.' });
     }
@@ -349,7 +390,7 @@ router.get('/attachments/:filename', (req, res, next) => {
  * PUT /api/community/messages/:id OR /api/community/channels/:channelId/messages/:id
  * Edit message content (Author or Admin)
  */
-const handleEditMessage = (req, res, next) => {
+const handleEditMessage = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { content } = req.body;
@@ -359,7 +400,7 @@ const handleEditMessage = (req, res, next) => {
     }
 
     const db = getDb();
-    const msg = db.prepare(`
+    const msg = await db.prepare(`
       SELECT m.*, c.name as channel_name
       FROM community_messages m
       JOIN community_channels c ON m.channel_id = c.id
@@ -383,20 +424,22 @@ const handleEditMessage = (req, res, next) => {
       }
     }
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE community_messages
       SET content = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(content.trim(), id);
 
     if (req.user.role === 'admin') {
-      logAdminAction(db, req.user.id, 'edit_community_message', { messageId: id, channel: msg.channel_name });
+      await logAdminAction(db, req.user.id, 'edit_community_message', { messageId: id, channel: msg.channel_name });
     }
 
     const io = req.app.get('io');
     if (io) {
       io.to(msg.channel_id).emit('message_edited', { messageId: id, content: content.trim() });
     }
+
+    broadcastRealtime(msg.channel_id, 'message_edited', { messageId: id, content: content.trim() });
 
     return res.status(200).json({ success: true, message: 'Message updated successfully.' });
   } catch (err) {
@@ -411,12 +454,12 @@ router.put('/channels/:channelId/messages/:id', handleEditMessage);
  * DELETE /api/community/messages/:id OR /api/community/channels/:channelId/messages/:id
  * Delete message (Author or Admin)
  */
-const handleDeleteMessage = (req, res, next) => {
+const handleDeleteMessage = async (req, res, next) => {
   try {
     const { id } = req.params;
     const db = getDb();
 
-    const msg = db.prepare(`
+    const msg = await db.prepare(`
       SELECT m.*, c.name as channel_name
       FROM community_messages m
       JOIN community_channels c ON m.channel_id = c.id
@@ -427,7 +470,6 @@ const handleDeleteMessage = (req, res, next) => {
       return res.status(404).json({ error: 'Message not found.' });
     }
 
-    // If Announcements channel, only permanent admin can delete
     if (msg.channel_name === 'Announcements') {
       const isPermanentAdmin = req.user.role === 'admin' && env.ADMIN_EMAILS.includes(req.user.email);
       if (!isPermanentAdmin) {
@@ -439,14 +481,13 @@ const handleDeleteMessage = (req, res, next) => {
       }
     }
 
-    db.prepare('UPDATE community_messages SET is_deleted = 1 WHERE id = ?').run(id);
+    await db.prepare('UPDATE community_messages SET is_deleted = 1 WHERE id = ?').run(id);
 
-    // If admin action, record audit log
     if (req.user.role === 'admin') {
-      logAdminAction(db, req.user.id, 'delete_community_message', {
+      await logAdminAction(db, req.user.id, 'delete_community_message', {
         messageId: id,
         channel: msg.channel_name,
-        originalAuthor: msg.user_id,
+        authorId: msg.user_id,
       });
     }
 
@@ -454,6 +495,8 @@ const handleDeleteMessage = (req, res, next) => {
     if (io) {
       io.to(msg.channel_id).emit('message_deleted', { messageId: id });
     }
+
+    broadcastRealtime(msg.channel_id, 'message_deleted', { messageId: id });
 
     return res.status(200).json({ success: true, message: 'Message removed.' });
   } catch (err) {
@@ -469,25 +512,27 @@ router.delete('/channels/:channelId/messages/:id', handleDeleteMessage);
  * POST /api/community/channels/:channelId/messages/:msgId/pin
  * PUT /api/community/messages/:id/pin
  */
-const handlePinMessage = (req, res, next) => {
+const handlePinMessage = async (req, res, next) => {
   try {
     const id = req.params.msgId || req.params.id;
     const db = getDb();
 
-    const msg = db.prepare('SELECT * FROM community_messages WHERE id = ?').get(id);
+    const msg = await db.prepare('SELECT * FROM community_messages WHERE id = ?').get(id);
     if (!msg) {
       return res.status(404).json({ error: 'Message not found.' });
     }
 
     const newPinned = msg.is_pinned ? 0 : 1;
-    db.prepare('UPDATE community_messages SET is_pinned = ? WHERE id = ?').run(newPinned, id);
+    await db.prepare('UPDATE community_messages SET is_pinned = ? WHERE id = ?').run(newPinned, id);
 
-    logAdminAction(db, req.user.id, newPinned ? 'pin_message' : 'unpin_message', { messageId: id });
+    await logAdminAction(db, req.user.id, newPinned ? 'pin_message' : 'unpin_message', { messageId: id });
 
     const io = req.app.get('io');
     if (io) {
       io.to(msg.channel_id).emit('message_pinned', { messageId: id, isPinned: !!newPinned });
     }
+
+    broadcastRealtime(msg.channel_id, 'message_pinned', { messageId: id, isPinned: !!newPinned });
 
     return res.status(200).json({
       success: true,
@@ -507,7 +552,7 @@ router.post('/channels/:channelId/messages/:msgId/pin', requireAdmin, handlePinM
  * POST /api/community/messages/:id/reactions
  * POST /api/community/channels/:channelId/messages/:msgId/reactions
  */
-const handleToggleReaction = (req, res, next) => {
+const handleToggleReaction = async (req, res, next) => {
   try {
     const id = req.params.msgId || req.params.id;
     const { emoji } = req.body;
@@ -517,16 +562,32 @@ const handleToggleReaction = (req, res, next) => {
     }
 
     const db = getDb();
-    const existing = db.prepare(
+    const msg = await db.prepare(`
+      SELECT m.channel_id, c.name as channel_name
+      FROM community_messages m
+      JOIN community_channels c ON m.channel_id = c.id
+      WHERE m.id = ?
+    `).get(id);
+
+    if (!msg) {
+      return res.status(404).json({ error: 'Message not found.' });
+    }
+
+    // STRICT CHECK: Students cannot react in Announcements!
+    if (msg.channel_name === 'Announcements') {
+      return res.status(403).json({ error: 'Reactions are disabled in the Announcements channel.' });
+    }
+
+    const existing = await db.prepare(
       'SELECT id FROM message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?'
     ).get(id, req.user.id, emoji);
 
     let action = '';
     if (existing) {
-      db.prepare('DELETE FROM message_reactions WHERE id = ?').run(existing.id);
+      await db.prepare('DELETE FROM message_reactions WHERE id = ?').run(existing.id);
       action = 'removed';
     } else {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO message_reactions (id, message_id, user_id, emoji)
         VALUES (?, ?, ?, ?)
       `).run(generateId(), id, req.user.id, emoji);
@@ -534,10 +595,11 @@ const handleToggleReaction = (req, res, next) => {
     }
 
     const io = req.app.get('io');
-    const msg = db.prepare('SELECT channel_id FROM community_messages WHERE id = ?').get(id);
-    if (io && msg) {
+    if (io) {
       io.to(msg.channel_id).emit('reaction_update', { messageId: id, emoji, action, userId: req.user.id });
     }
+
+    broadcastRealtime(msg.channel_id, 'reaction_update', { messageId: id, emoji, action, userId: req.user.id });
 
     return res.status(200).json({ success: true, action });
   } catch (err) {
@@ -553,7 +615,7 @@ router.post('/channels/:channelId/messages/:msgId/reactions', handleToggleReacti
  * POST /api/community/messages/:id/report
  * POST /api/community/channels/:channelId/messages/:msgId/report
  */
-const handleReportMessage = (req, res, next) => {
+const handleReportMessage = async (req, res, next) => {
   try {
     const id = req.params.msgId || req.params.id;
     const { reason } = req.body;
@@ -563,13 +625,13 @@ const handleReportMessage = (req, res, next) => {
     }
 
     const db = getDb();
-    const msg = db.prepare('SELECT user_id FROM community_messages WHERE id = ?').get(id);
+    const msg = await db.prepare('SELECT user_id FROM community_messages WHERE id = ?').get(id);
     if (!msg) {
       return res.status(404).json({ error: 'Message not found.' });
     }
 
     const reportId = generateId();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO reports (id, reporter_id, reported_message_id, reported_user_id, reason)
       VALUES (?, ?, ?, ?, ?)
     `).run(reportId, req.user.id, id, msg.user_id, reason.trim());

@@ -33,12 +33,14 @@ const mcqGeneratorRoutes = require('./routes/mcqGenerator');
 // Validate environment
 env.validateEnv();
 
-// Initialize database schema and default seeds
-try {
-  runMigrations();
-  seedDatabase();
-} catch (dbErr) {
-  console.error('Database initialization warning:', dbErr);
+// Initialize database schema and default seeds (for local SQLite development)
+if (!process.env.DATABASE_URL) {
+  try {
+    runMigrations();
+    seedDatabase();
+  } catch (dbErr) {
+    console.error('Database initialization warning:', dbErr);
+  }
 }
 
 const app = express();

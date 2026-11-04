@@ -10,10 +10,10 @@ const { sanitizeUser } = require('../utils/helpers');
 const COOKIE_NAME = 'topperbatch_token';
 
 /**
- * Authenticate user from JWT in httpOnly cookie.
+ * Authenticate user from JWT in httpOnly cookie or Bearer header.
  * Attaches user object to req.user on success.
  */
-function authenticate(req, res, next) {
+async function authenticate(req, res, next) {
   try {
     let token = req.cookies?.[COOKIE_NAME];
     if (!token && req.headers?.authorization && req.headers.authorization.startsWith('Bearer ')) {
@@ -40,7 +40,7 @@ function authenticate(req, res, next) {
     const db = getDb();
 
     // Check session exists and is active
-    const session = db.prepare(
+    const session = await db.prepare(
       'SELECT * FROM sessions WHERE user_id = ? AND is_active = 1 AND expires_at > datetime(\'now\')'
     ).get(decoded.userId);
 
@@ -50,7 +50,7 @@ function authenticate(req, res, next) {
     }
 
     // Get user
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(decoded.userId);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(decoded.userId);
 
     if (!user) {
       clearAuthCookie(res);
@@ -66,7 +66,7 @@ function authenticate(req, res, next) {
     }
 
     // Update last active date
-    db.prepare('UPDATE users SET last_active_date = datetime(\'now\') WHERE id = ?').run(user.id);
+    await db.prepare('UPDATE users SET last_active_date = datetime(\'now\') WHERE id = ?').run(user.id);
 
     // Attach sanitized user to request
     req.user = sanitizeUser(user);

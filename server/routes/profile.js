@@ -1,5 +1,6 @@
 // =============================================================================
 // TopperBatch - Student Profile Routes
+// Production-Ready: Supabase PostgreSQL
 // =============================================================================
 
 const express = require('express');
@@ -46,21 +47,21 @@ router.use(authenticate, requireApproved);
  * GET /api/profile
  * Get logged-in student's full profile
  */
-router.get('/', (req, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
     const db = getDb();
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found.' });
 
     // Calculate current rank
-    const rankRow = db.prepare(`
+    const rankRow = await db.prepare(`
       SELECT COUNT(*) + 1 as rank
       FROM users
       WHERE role = 'student' AND status = 'approved' AND total_points > ?
     `).get(user.total_points || 0);
 
     // Get earned achievements
-    const achievements = db.prepare(`
+    const achievements = await db.prepare(`
       SELECT a.*, ua.earned_at
       FROM achievements a
       JOIN user_achievements ua ON a.id = ua.achievement_id
@@ -68,7 +69,7 @@ router.get('/', (req, res, next) => {
     `).all(req.user.id);
 
     // Get recent activity (quiz attempts)
-    const recentActivity = db.prepare(`
+    const recentActivity = await db.prepare(`
       SELECT qa.id, qa.score, qa.total_correct, qa.submitted_at, c.title as challenge_title
       FROM quiz_attempts qa
       JOIN mcq_challenges c ON qa.challenge_id = c.id
@@ -95,12 +96,12 @@ router.get('/', (req, res, next) => {
  * PUT /api/profile
  * Update student profile permitted fields only
  */
-router.put('/', (req, res, next) => {
+router.put('/', async (req, res, next) => {
   try {
     const { full_name, semester, department, bio, avatar_url } = req.body;
     const db = getDb();
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE users
       SET full_name = COALESCE(?, full_name),
           semester = COALESCE(?, semester),
@@ -118,7 +119,7 @@ router.put('/', (req, res, next) => {
       req.user.id
     );
 
-    const updatedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    const updatedUser = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
 
     return res.status(200).json({
       success: true,
@@ -134,12 +135,12 @@ router.put('/', (req, res, next) => {
  * GET /api/profile/:id
  * View peer student's public profile
  */
-router.get('/:id', (req, res, next) => {
+router.get('/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
     const db = getDb();
 
-    const user = db.prepare(`
+    const user = await db.prepare(`
       SELECT id, full_name, avatar_url, semester, department, bio, total_points, study_streak, created_at
       FROM users
       WHERE id = ? AND status = 'approved'
@@ -147,13 +148,13 @@ router.get('/:id', (req, res, next) => {
 
     if (!user) return res.status(404).json({ error: 'Student profile not found.' });
 
-    const rankRow = db.prepare(`
+    const rankRow = await db.prepare(`
       SELECT COUNT(*) + 1 as rank
       FROM users
       WHERE role = 'student' AND status = 'approved' AND total_points > ?
     `).get(user.total_points || 0);
 
-    const achievements = db.prepare(`
+    const achievements = await db.prepare(`
       SELECT a.name, a.icon, a.badge_color, ua.earned_at
       FROM achievements a
       JOIN user_achievements ua ON a.id = ua.achievement_id
@@ -177,13 +178,13 @@ router.get('/:id', (req, res, next) => {
  * POST /api/profile/avatar
  * Upload avatar image
  */
-router.post('/avatar', uploadAvatar.single('avatar'), (req, res, next) => {
+router.post('/avatar', uploadAvatar.single('avatar'), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No image uploaded.' });
 
     const avatarUrl = `/api/profile/avatar-file/${req.file.filename}`;
     const db = getDb();
-    db.prepare("UPDATE users SET avatar_url = ?, updated_at = datetime('now') WHERE id = ?").run(avatarUrl, req.user.id);
+    await db.prepare("UPDATE users SET avatar_url = ?, updated_at = datetime('now') WHERE id = ?").run(avatarUrl, req.user.id);
 
     return res.status(200).json({ success: true, avatarUrl });
   } catch (err) {
@@ -205,4 +206,3 @@ router.get('/avatar-file/:filename', (req, res) => {
 });
 
 module.exports = router;
-

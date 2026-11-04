@@ -13,6 +13,8 @@
     "start": "cd server && npm start",
     "db:migrate": "cd server && node database/migrate.js",
     "db:seed": "cd server && node database/seed.js",
+    "migrate:supabase": "node scripts/migrate-sqlite-to-supabase.js",
+    "migrate:storage": "node scripts/migrate-pdfs-to-supabase.js",
     "test": "cd server && npm test"
   },
   "dependencies": {
@@ -31,7 +33,9 @@
     "nodemailer": "^6.9.16",
     "pdf-parse": "^1.1.1",
     "socket.io": "^4.8.1",
-    "uuid": "^11.0.3"
+    "uuid": "^11.0.3",
+    "@supabase/supabase-js": "^2.49.1",
+    "pg": "^8.13.3"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

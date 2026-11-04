@@ -1,5 +1,6 @@
 // =============================================================================
 // TopperBatch - MCQ Competitions & Leaderboard Routes
+// Production-Ready: Supabase PostgreSQL
 // =============================================================================
 
 const express = require('express');
@@ -19,13 +20,13 @@ router.use(authenticate);
  * GET /api/quiz/daily
  * Get today's active challenge with sanitized questions (no correct flags)
  */
-router.get('/daily', requireApproved, (req, res, next) => {
+router.get('/daily', requireApproved, async (req, res, next) => {
   try {
     const db = getDb();
     const today = new Date().toISOString().split('T')[0];
 
     // Find active challenge for today or most recent active challenge
-    let challenge = db.prepare(`
+    let challenge = await db.prepare(`
       SELECT c.*, s.name as subject_name
       FROM mcq_challenges c
       LEFT JOIN subjects s ON c.subject_id = s.id
@@ -43,14 +44,14 @@ router.get('/daily', requireApproved, (req, res, next) => {
     }
 
     // Check if user already attempted
-    const userAttempt = db.prepare(`
+    const userAttempt = await db.prepare(`
       SELECT id, is_submitted, score, time_taken_seconds, submitted_at
       FROM quiz_attempts
       WHERE challenge_id = ? AND user_id = ?
     `).get(challenge.id, req.user.id);
 
     // Fetch questions linked to this challenge
-    const questions = db.prepare(`
+    const questions = await db.prepare(`
       SELECT q.id, q.question_text, q.difficulty, q.subject_id
       FROM questions q
       WHERE q.challenge_id = ?
@@ -58,15 +59,16 @@ router.get('/daily', requireApproved, (req, res, next) => {
     `).all(challenge.id);
 
     // Fetch options for each question without exposing is_correct
-    const questionsWithOptions = questions.map((q) => {
-      const options = db.prepare(`
+    const questionsWithOptions = [];
+    for (const q of questions) {
+      const options = await db.prepare(`
         SELECT id, option_text, option_order
         FROM answer_options
         WHERE question_id = ?
         ORDER BY RANDOM()
       `).all(q.id);
-      return { ...q, options };
-    });
+      questionsWithOptions.push({ ...q, options });
+    }
 
     return res.status(200).json({
       success: true,
@@ -91,7 +93,7 @@ router.get('/daily', requireApproved, (req, res, next) => {
 /**
  * POST /api/quiz/:challengeId/start
  */
-router.post('/:challengeId/start', requireApproved, (req, res, next) => {
+router.post('/:challengeId/start', requireApproved, async (req, res, next) => {
   req.body.challenge_id = req.params.challengeId;
   return handleStartAttempt(req, res, next);
 });
@@ -102,7 +104,7 @@ router.post('/:challengeId/start', requireApproved, (req, res, next) => {
  */
 router.post('/attempts', requireApproved, handleStartAttempt);
 
-function handleStartAttempt(req, res, next) {
+async function handleStartAttempt(req, res, next) {
   try {
     const { challenge_id } = req.body;
     if (!challenge_id) {
@@ -112,13 +114,13 @@ function handleStartAttempt(req, res, next) {
     const db = getDb();
 
     // Verify challenge exists and is active
-    const challenge = db.prepare('SELECT * FROM mcq_challenges WHERE id = ? AND is_active = 1').get(challenge_id);
+    const challenge = await db.prepare('SELECT * FROM mcq_challenges WHERE id = ? AND is_active = 1').get(challenge_id);
     if (!challenge) {
       return res.status(404).json({ error: 'Competition not found or is currently closed.' });
     }
 
     // Check existing attempt
-    const existingAttempt = db.prepare(
+    const existingAttempt = await db.prepare(
       'SELECT id, is_submitted FROM quiz_attempts WHERE challenge_id = ? AND user_id = ?'
     ).get(challenge_id, req.user.id);
 
@@ -134,7 +136,7 @@ function handleStartAttempt(req, res, next) {
     }
 
     const attemptId = generateId();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO quiz_attempts (id, challenge_id, user_id, started_at)
       VALUES (?, ?, ?, datetime('now'))
     `).run(attemptId, challenge_id, req.user.id);
@@ -152,9 +154,9 @@ function handleStartAttempt(req, res, next) {
 /**
  * POST /api/quiz/:challengeId/submit
  */
-router.post('/:challengeId/submit', requireApproved, (req, res, next) => {
+router.post('/:challengeId/submit', requireApproved, async (req, res, next) => {
   const db = getDb();
-  const attempt = db.prepare('SELECT id FROM quiz_attempts WHERE challenge_id = ? AND user_id = ?').get(
+  const attempt = await db.prepare('SELECT id FROM quiz_attempts WHERE challenge_id = ? AND user_id = ?').get(
     req.params.challengeId,
     req.user.id
   );
@@ -169,13 +171,13 @@ router.post('/:challengeId/submit', requireApproved, (req, res, next) => {
  */
 router.put('/attempts/:id/submit', requireApproved, handleSubmitAttempt);
 
-function handleSubmitAttempt(req, res, next) {
+async function handleSubmitAttempt(req, res, next) {
   try {
     const { id } = req.params;
     const { answers, time_taken_seconds } = req.body; // answers: { [questionId]: optionId }
 
     const db = getDb();
-    const attempt = db.prepare('SELECT * FROM quiz_attempts WHERE id = ? AND user_id = ?').get(id, req.user.id);
+    const attempt = await db.prepare('SELECT * FROM quiz_attempts WHERE id = ? AND user_id = ?').get(id, req.user.id);
 
     if (!attempt) {
       return res.status(404).json({ error: 'Attempt not found.' });
@@ -185,8 +187,8 @@ function handleSubmitAttempt(req, res, next) {
       return res.status(400).json({ error: 'This challenge attempt has already been submitted.' });
     }
 
-    const challenge = db.prepare('SELECT * FROM mcq_challenges WHERE id = ?').get(attempt.challenge_id);
-    const questions = db.prepare('SELECT id FROM questions WHERE challenge_id = ?').all(attempt.challenge_id);
+    const challenge = await db.prepare('SELECT * FROM mcq_challenges WHERE id = ?').get(attempt.challenge_id);
+    const questions = await db.prepare('SELECT id FROM questions WHERE challenge_id = ?').all(attempt.challenge_id);
 
     let totalCorrect = 0;
     let totalIncorrect = 0;
@@ -195,62 +197,56 @@ function handleSubmitAttempt(req, res, next) {
     const correctPts = challenge.scoring_correct || 10;
     const bonusPts = challenge.participation_bonus || 5;
 
-    // Use transaction to record student answers and update score
-    const submitTx = db.transaction(() => {
-      const answerInsertStmt = db.prepare(`
-        INSERT INTO student_answers (id, attempt_id, question_id, selected_option_id, is_correct)
-        VALUES (?, ?, ?, ?, ?)
-      `);
+    const answerInsertStmt = db.prepare(`
+      INSERT INTO student_answers (id, attempt_id, question_id, selected_option_id, is_correct)
+      VALUES (?, ?, ?, ?, ?)
+    `);
 
-      for (const q of questions) {
-        const selectedOptionId = answers ? answers[q.id] : null;
+    for (const q of questions) {
+      const selectedOptionId = answers ? answers[q.id] : null;
 
-        if (!selectedOptionId) {
-          totalUnanswered++;
-          answerInsertStmt.run(generateId(), id, q.id, null, 0);
+      if (!selectedOptionId) {
+        totalUnanswered++;
+        await answerInsertStmt.run(generateId(), id, q.id, null, 0);
+      } else {
+        const opt = await db.prepare('SELECT is_correct FROM answer_options WHERE id = ? AND question_id = ?').get(
+          selectedOptionId,
+          q.id
+        );
+
+        if (opt && opt.is_correct === 1) {
+          totalCorrect++;
+          await answerInsertStmt.run(generateId(), id, q.id, selectedOptionId, 1);
         } else {
-          // Check correctness server-side
-          const opt = db.prepare('SELECT is_correct FROM answer_options WHERE id = ? AND question_id = ?').get(
-            selectedOptionId,
-            q.id
-          );
-
-          if (opt && opt.is_correct === 1) {
-            totalCorrect++;
-            answerInsertStmt.run(generateId(), id, q.id, selectedOptionId, 1);
-          } else {
-            totalIncorrect++;
-            answerInsertStmt.run(generateId(), id, q.id, selectedOptionId, 0);
-          }
+          totalIncorrect++;
+          await answerInsertStmt.run(generateId(), id, q.id, selectedOptionId, 0);
         }
       }
+    }
 
-      const rawScore = totalCorrect * correctPts + bonusPts;
+    const rawScore = totalCorrect * correctPts + bonusPts;
 
-      // Update attempt record
-      db.prepare(`
-        UPDATE quiz_attempts
-        SET is_submitted = 1,
-            submitted_at = datetime('now'),
-            score = ?,
-            total_correct = ?,
-            total_incorrect = ?,
-            total_unanswered = ?,
-            time_taken_seconds = ?
-        WHERE id = ?
-      `).run(rawScore, totalCorrect, totalIncorrect, totalUnanswered, time_taken_seconds || 0, id);
+    // Update attempt record
+    await db.prepare(`
+      UPDATE quiz_attempts
+      SET is_submitted = 1,
+          submitted_at = datetime('now'),
+          score = ?,
+          total_correct = ?,
+          total_incorrect = ?,
+          total_unanswered = ?,
+          time_taken_seconds = ?
+      WHERE id = ?
+    `).run(rawScore, totalCorrect, totalIncorrect, totalUnanswered, time_taken_seconds || 0, id);
 
-      // Update student's cumulative total_points & study streak
-      db.prepare(`
-        UPDATE users
-        SET total_points = total_points + ?,
-            study_streak = study_streak + 1,
-            last_active_date = datetime('now')
-        WHERE id = ?
-      `).run(rawScore, req.user.id);
-    });
-
-    submitTx();
+    // Update student's cumulative total_points & study streak
+    await db.prepare(`
+      UPDATE users
+      SET total_points = total_points + ?,
+          study_streak = study_streak + 1,
+          last_active_date = datetime('now')
+      WHERE id = ?
+    `).run(rawScore, req.user.id);
 
     const finalScore = totalCorrect * correctPts + bonusPts;
     const totalQ = questions.length;
@@ -275,9 +271,9 @@ function handleSubmitAttempt(req, res, next) {
 /**
  * GET /api/quiz/:challengeId/results
  */
-router.get('/:challengeId/results', requireApproved, (req, res, next) => {
+router.get('/:challengeId/results', requireApproved, async (req, res, next) => {
   const db = getDb();
-  const attempt = db.prepare('SELECT id FROM quiz_attempts WHERE challenge_id = ? AND user_id = ?').get(
+  const attempt = await db.prepare('SELECT id FROM quiz_attempts WHERE challenge_id = ? AND user_id = ?').get(
     req.params.challengeId,
     req.user.id
   );
@@ -292,12 +288,12 @@ router.get('/:challengeId/results', requireApproved, (req, res, next) => {
  */
 router.get('/attempts/:id/results', requireApproved, handleGetResults);
 
-function handleGetResults(req, res, next) {
+async function handleGetResults(req, res, next) {
   try {
     const { id } = req.params;
     const db = getDb();
 
-    const attempt = db.prepare(`
+    const attempt = await db.prepare(`
       SELECT a.*, c.title as challenge_title
       FROM quiz_attempts a
       JOIN mcq_challenges c ON a.challenge_id = c.id
@@ -309,26 +305,27 @@ function handleGetResults(req, res, next) {
     }
 
     // Fetch questions and answers
-    const studentAnswers = db.prepare(`
+    const studentAnswers = await db.prepare(`
       SELECT sa.*, q.question_text, q.explanation
       FROM student_answers sa
       JOIN questions q ON sa.question_id = q.id
       WHERE sa.attempt_id = ?
     `).all(id);
 
-    const detailedQuestions = studentAnswers.map((sa) => {
-      const options = db.prepare('SELECT id, option_text, is_correct FROM answer_options WHERE question_id = ?').all(
+    const detailedQuestions = [];
+    for (const sa of studentAnswers) {
+      const options = await db.prepare('SELECT id, option_text, is_correct FROM answer_options WHERE question_id = ?').all(
         sa.question_id
       );
-      return {
+      detailedQuestions.push({
         questionId: sa.question_id,
         questionText: sa.question_text,
         explanation: sa.explanation,
         selectedOptionId: sa.selected_option_id,
         isCorrect: sa.is_correct === 1,
         options,
-      };
-    });
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -344,7 +341,7 @@ function handleGetResults(req, res, next) {
  * GET /api/quiz/leaderboard
  * Rankings: Daily, Weekly, or All-Time
  */
-router.get('/leaderboard', requireApproved, (req, res, next) => {
+router.get('/leaderboard', requireApproved, async (req, res, next) => {
   try {
     const { type = 'daily' } = req.query;
     const db = getDb();
@@ -371,7 +368,7 @@ router.get('/leaderboard', requireApproved, (req, res, next) => {
         FROM quiz_attempts qa
         JOIN users u ON qa.user_id = u.id
         WHERE qa.is_submitted = 1 AND qa.submitted_at >= datetime('now', '-7 days')
-        GROUP BY u.id
+        GROUP BY u.id, u.full_name, u.avatar_url, u.department, u.semester
         ORDER BY score DESC, time_taken_seconds ASC
         LIMIT 50
       `;
@@ -388,9 +385,8 @@ router.get('/leaderboard', requireApproved, (req, res, next) => {
       `;
     }
 
-    const leaderboard = db.prepare(query).all(...params);
+    const leaderboard = await db.prepare(query).all(...params);
 
-    // Annotate rank numbers
     const ranked = leaderboard.map((entry, index) => ({
       ...entry,
       rank: index + 1,
@@ -411,7 +407,7 @@ router.get('/leaderboard', requireApproved, (req, res, next) => {
  * GET /api/quiz/practice
  * Random practice questions
  */
-router.get('/practice', requireApproved, (req, res, next) => {
+router.get('/practice', requireApproved, async (req, res, next) => {
   try {
     const { subject_id, count = 10 } = req.query;
     const db = getDb();
@@ -427,14 +423,15 @@ router.get('/practice', requireApproved, (req, res, next) => {
     query += ' ORDER BY RANDOM() LIMIT ?';
     params.push(Math.min(25, parseInt(count, 10) || 10));
 
-    const questions = db.prepare(query).all(...params);
+    const questions = await db.prepare(query).all(...params);
 
-    const fullQuestions = questions.map((q) => {
-      const options = db.prepare('SELECT id, option_text, is_correct FROM answer_options WHERE question_id = ?').all(
+    const fullQuestions = [];
+    for (const q of questions) {
+      const options = await db.prepare('SELECT id, option_text, is_correct FROM answer_options WHERE question_id = ?').all(
         q.id
       );
-      return { ...q, options };
-    });
+      fullQuestions.push({ ...q, options });
+    }
 
     return res.status(200).json({ success: true, questions: fullQuestions });
   } catch (err) {
@@ -445,10 +442,10 @@ router.get('/practice', requireApproved, (req, res, next) => {
 /**
  * GET /api/quiz/daily/history
  */
-router.get('/daily/history', requireApproved, (req, res, next) => {
+router.get('/daily/history', requireApproved, async (req, res, next) => {
   try {
     const db = getDb();
-    const history = db.prepare(`
+    const history = await db.prepare(`
       SELECT c.id, c.title, c.challenge_date, s.name as subject_name,
              qa.score, qa.total_correct, qa.time_taken_seconds, qa.submitted_at
       FROM mcq_challenges c
@@ -467,10 +464,10 @@ router.get('/daily/history', requireApproved, (req, res, next) => {
 /**
  * GET /api/quiz/my-attempts
  */
-router.get('/my-attempts', requireApproved, (req, res, next) => {
+router.get('/my-attempts', requireApproved, async (req, res, next) => {
   try {
     const db = getDb();
-    const attempts = db.prepare(`
+    const attempts = await db.prepare(`
       SELECT qa.*, c.title as challenge_title, c.challenge_date
       FROM quiz_attempts qa
       JOIN mcq_challenges c ON qa.challenge_id = c.id
@@ -490,7 +487,7 @@ router.get('/my-attempts', requireApproved, (req, res, next) => {
 /**
  * POST /api/quiz/questions (Admin)
  */
-router.post('/questions', requireAdmin, (req, res, next) => {
+router.post('/questions', requireAdmin, async (req, res, next) => {
   try {
     const { question_text, explanation, difficulty = 'medium', subject_id, challenge_id, options } = req.body;
 
@@ -501,23 +498,20 @@ router.post('/questions', requireAdmin, (req, res, next) => {
     const db = getDb();
     const questionId = generateId();
 
-    const insertTx = db.transaction(() => {
-      db.prepare(`
-        INSERT INTO questions (id, challenge_id, question_text, explanation, difficulty, subject_id, is_approved, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, 1, ?)
-      `).run(questionId, challenge_id || null, question_text.trim(), explanation || null, difficulty, subject_id || null, req.user.id);
+    await db.prepare(`
+      INSERT INTO questions (id, challenge_id, question_text, explanation, difficulty, subject_id, is_approved, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+    `).run(questionId, challenge_id || null, question_text.trim(), explanation || null, difficulty, subject_id || null, req.user.id);
 
-      const optStmt = db.prepare(`
-        INSERT INTO answer_options (id, question_id, option_text, is_correct, option_order)
-        VALUES (?, ?, ?, ?, ?)
-      `);
+    const optStmt = db.prepare(`
+      INSERT INTO answer_options (id, question_id, option_text, is_correct, option_order)
+      VALUES (?, ?, ?, ?, ?)
+    `);
 
-      options.forEach((opt, idx) => {
-        optStmt.run(generateId(), questionId, opt.text.trim(), opt.isCorrect ? 1 : 0, idx + 1);
-      });
-    });
-
-    insertTx();
+    for (let idx = 0; idx < options.length; idx++) {
+      const opt = options[idx];
+      await optStmt.run(generateId(), questionId, opt.text.trim(), opt.isCorrect ? 1 : 0, idx + 1);
+    }
 
     return res.status(201).json({ success: true, message: 'Question forged successfully!', questionId });
   } catch (err) {
@@ -528,7 +522,7 @@ router.post('/questions', requireAdmin, (req, res, next) => {
 /**
  * GET /api/quiz/questions (Admin)
  */
-router.get('/questions', requireAdmin, (req, res, next) => {
+router.get('/questions', requireAdmin, async (req, res, next) => {
   try {
     const { subject_id, page = 1, limit = 20 } = req.query;
     const db = getDb();
@@ -542,9 +536,10 @@ router.get('/questions', requireAdmin, (req, res, next) => {
       params.push(subject_id);
     }
 
-    const total = db.prepare(`SELECT COUNT(*) as total FROM questions q ${whereClause}`).get(...params).total;
+    const countRow = await db.prepare(`SELECT COUNT(*) as total FROM questions q ${whereClause}`).get(...params);
+    const total = countRow ? parseInt(countRow.total, 10) : 0;
 
-    const questions = db.prepare(`
+    const questions = await db.prepare(`
       SELECT q.*, s.name as subject_name
       FROM questions q
       LEFT JOIN subjects s ON q.subject_id = s.id
@@ -553,10 +548,11 @@ router.get('/questions', requireAdmin, (req, res, next) => {
       LIMIT ? OFFSET ?
     `).all(...params, l, o);
 
-    const questionsWithOptions = questions.map((q) => {
-      const options = db.prepare('SELECT * FROM answer_options WHERE question_id = ?').all(q.id);
-      return { ...q, options };
-    });
+    const questionsWithOptions = [];
+    for (const q of questions) {
+      const options = await db.prepare('SELECT * FROM answer_options WHERE question_id = ?').all(q.id);
+      questionsWithOptions.push({ ...q, options });
+    }
 
     return res.status(200).json({
       success: true,
@@ -576,7 +572,7 @@ router.get('/questions', requireAdmin, (req, res, next) => {
 /**
  * POST /api/quiz/challenges (Admin)
  */
-router.post('/challenges', requireAdmin, (req, res, next) => {
+router.post('/challenges', requireAdmin, async (req, res, next) => {
   try {
     const {
       title,
@@ -596,34 +592,30 @@ router.post('/challenges', requireAdmin, (req, res, next) => {
     const db = getDb();
     const challengeId = generateId();
 
-    const createTx = db.transaction(() => {
-      db.prepare(`
-        INSERT INTO mcq_challenges (
-          id, title, description, subject_id, challenge_date, duration_minutes,
-          scoring_correct, participation_bonus, is_active, is_published, created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?)
-      `).run(
-        challengeId,
-        title.trim(),
-        description || null,
-        subject_id || null,
-        challenge_date,
-        duration_minutes,
-        scoring_correct,
-        participation_bonus,
-        req.user.id
-      );
+    await db.prepare(`
+      INSERT INTO mcq_challenges (
+        id, title, description, subject_id, challenge_date, duration_minutes,
+        scoring_correct, participation_bonus, is_active, is_published, created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?)
+    `).run(
+      challengeId,
+      title.trim(),
+      description || null,
+      subject_id || null,
+      challenge_date,
+      duration_minutes,
+      scoring_correct,
+      participation_bonus,
+      req.user.id
+    );
 
-      // Link questions if provided
-      if (question_ids && Array.isArray(question_ids)) {
-        const linkStmt = db.prepare('UPDATE questions SET challenge_id = ? WHERE id = ?');
-        for (const qid of question_ids) {
-          linkStmt.run(challengeId, qid);
-        }
+    // Link questions if provided
+    if (question_ids && Array.isArray(question_ids)) {
+      const linkStmt = db.prepare('UPDATE questions SET challenge_id = ? WHERE id = ?');
+      for (const qid of question_ids) {
+        await linkStmt.run(challengeId, qid);
       }
-    });
-
-    createTx();
+    }
 
     return res.status(201).json({
       success: true,
@@ -638,10 +630,10 @@ router.post('/challenges', requireAdmin, (req, res, next) => {
 /**
  * GET /api/quiz/challenges (Admin)
  */
-router.get('/challenges', requireAdmin, (req, res, next) => {
+router.get('/challenges', requireAdmin, async (req, res, next) => {
   try {
     const db = getDb();
-    const challenges = db.prepare(`
+    const challenges = await db.prepare(`
       SELECT c.*, s.name as subject_name,
              (SELECT COUNT(*) FROM questions WHERE challenge_id = c.id) as question_count,
              (SELECT COUNT(*) FROM quiz_attempts WHERE challenge_id = c.id AND is_submitted = 1) as attempt_count
