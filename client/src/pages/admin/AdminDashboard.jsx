@@ -16,6 +16,7 @@ import {
   ArrowRight,
   Settings,
   Upload,
+  Sparkles,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -75,8 +76,13 @@ export const AdminDashboard = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <Link to="/admin/mcq-generator">
+            <ComicButton variant="yellow" size="sm" icon={<Sparkles className="w-4 h-4 text-punch-red" />}>
+              AI MCQ FORGE
+            </ComicButton>
+          </Link>
           <Link to="/admin/upload">
-            <ComicButton variant="yellow" size="sm" icon={<Upload className="w-4 h-4" />}>
+            <ComicButton variant="white" size="sm" icon={<Upload className="w-4 h-4" />}>
               UPLOAD PDF
             </ComicButton>
           </Link>

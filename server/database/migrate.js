@@ -387,6 +387,25 @@ function runMigrations() {
       created_at TEXT DEFAULT (datetime('now')),
       UNIQUE(user_id, document_id)
     );
+
+    -- =========================================================================
+    -- AI MCQ Draft Sessions (Admin-Only MCQ Generator)
+    -- =========================================================================
+    CREATE TABLE IF NOT EXISTS mcq_draft_sessions (
+      id TEXT PRIMARY KEY,
+      admin_id TEXT REFERENCES users(id),
+      document_id TEXT REFERENCES documents(id),
+      source_pdf_name TEXT,
+      topic TEXT,
+      difficulty TEXT DEFAULT 'mixed',
+      question_style TEXT DEFAULT 'mixed',
+      question_count INTEGER DEFAULT 10,
+      instructions TEXT,
+      status TEXT DEFAULT 'draft' CHECK(status IN ('draft', 'review', 'published')),
+      generated_data TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   // =========================================================================
@@ -400,12 +419,21 @@ function runMigrations() {
     'CREATE INDEX IF NOT EXISTS idx_documents_subject_id ON documents(subject_id)',
     'CREATE INDEX IF NOT EXISTS idx_documents_semester_id ON documents(semester_id)',
     'CREATE INDEX IF NOT EXISTS idx_document_pages_document_id ON document_pages(document_id)',
+    'CREATE INDEX IF NOT EXISTS idx_document_pages_doc_page ON document_pages(document_id, page_number)',
     'CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(document_id)',
+    'CREATE INDEX IF NOT EXISTS idx_document_chunks_doc_chunk ON document_chunks(document_id, chunk_index)',
+    'CREATE INDEX IF NOT EXISTS idx_chat_conversations_user_updated ON chat_conversations(user_id, updated_at)',
+    'CREATE INDEX IF NOT EXISTS idx_chat_messages_conv_created ON chat_messages(conversation_id, created_at)',
     'CREATE INDEX IF NOT EXISTS idx_community_messages_channel_id ON community_messages(channel_id)',
+    'CREATE INDEX IF NOT EXISTS idx_community_messages_channel_created ON community_messages(channel_id, created_at)',
     'CREATE INDEX IF NOT EXISTS idx_quiz_attempts_challenge_user ON quiz_attempts(challenge_id, user_id)',
+    'CREATE INDEX IF NOT EXISTS idx_questions_challenge ON questions(challenge_id)',
+    'CREATE INDEX IF NOT EXISTS idx_questions_approved ON questions(is_approved)',
+    'CREATE INDEX IF NOT EXISTS idx_answer_options_question ON answer_options(question_id)',
     'CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read)',
     'CREATE INDEX IF NOT EXISTS idx_audit_logs_admin_id ON audit_logs(admin_id)',
     'CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)',
+    'CREATE INDEX IF NOT EXISTS idx_mcq_draft_sessions_admin ON mcq_draft_sessions(admin_id)',
   ];
 
   for (const idx of indexes) {
@@ -418,6 +446,9 @@ function runMigrations() {
   try { db.exec('ALTER TABLE community_messages ADD COLUMN attachment_name TEXT'); } catch (_) {}
   try { db.exec('ALTER TABLE community_messages ADD COLUMN attachment_size INTEGER'); } catch (_) {}
   try { db.exec('ALTER TABLE community_messages ADD COLUMN attachment_type TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE questions ADD COLUMN page_number INTEGER'); } catch (_) {}
+  try { db.exec('ALTER TABLE questions ADD COLUMN topic TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE questions ADD COLUMN source_pdf_name TEXT'); } catch (_) {}
 
   console.log('✅ Database migrations completed successfully.');
 }

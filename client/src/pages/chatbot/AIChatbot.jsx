@@ -142,27 +142,112 @@ export const AIChatbot = () => {
     }
 
     const optimisticUserMsg = {
-      id: `temp_${Date.now()}`,
+      id: `temp_usr_${Date.now()}`,
       role: 'user',
       content: text.trim(),
       created_at: new Date().toISOString(),
     };
 
-    setMessages((prev) => [...prev, optimisticUserMsg]);
+    const streamMsgId = `temp_ast_${Date.now()}`;
+    const optimisticAssistantMsg = {
+      id: streamMsgId,
+      role: 'assistant',
+      content: '',
+      sources: [],
+      isStreaming: true,
+      created_at: new Date().toISOString(),
+    };
+
+    setMessages((prev) => [...prev, optimisticUserMsg, optimisticAssistantMsg]);
     setInputText('');
     setSending(true);
 
     try {
-      const res = await chatApi.sendMessage(convId, {
-        content: text.trim(),
-        document_id: selectedDocId || null,
+      const token = localStorage.getItem('topperbatch_token') || '';
+      const response = await fetch(`/api/chatbot/conversations/${convId}/messages/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+        },
+        body: JSON.stringify({
+          content: text.trim(),
+          document_id: selectedDocId || null,
+        }),
       });
 
-      if (res.data?.success && res.data.message) {
-        setMessages((prev) => [...prev, res.data.message]);
+      if (!response.ok || !response.body) {
+        throw new Error('Streaming connection failed, falling back to standard request.');
       }
-    } catch (err) {
-      toast.error('AI response failed. Verify GEMINI_API_KEY on the server.');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // keep remainder
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+
+          try {
+            const data = JSON.parse(trimmed.slice(5).trim());
+
+            if (data.type === 'sources' && Array.isArray(data.sources)) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === streamMsgId ? { ...m, sources: data.sources } : m
+                )
+              );
+            } else if (data.type === 'token' && typeof data.token === 'string') {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === streamMsgId
+                    ? { ...m, content: (m.content || '') + data.token }
+                    : m
+                )
+              );
+              messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            } else if (data.type === 'done' && data.message) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === streamMsgId
+                    ? {
+                        ...data.message,
+                        isStreaming: false,
+                      }
+                    : m
+                )
+              );
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (streamErr) {
+      // Fallback to standard JSON endpoint
+      try {
+        const res = await chatApi.sendMessage(convId, {
+          content: text.trim(),
+          document_id: selectedDocId || null,
+        });
+
+        if (res.data?.success && res.data.message) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === streamMsgId ? res.data.message : m))
+          );
+        }
+      } catch (fallbackErr) {
+        // Remove empty assistant placeholder and restore user prompt for easy retry
+        setMessages((prev) => prev.filter((m) => m.id !== streamMsgId));
+        setInputText(text);
+        toast.error('AI response failed. Please verify that your GEMINI_API_KEY is active.');
+      }
     } finally {
       setSending(false);
       setTimeout(() => {
@@ -181,10 +266,10 @@ export const AIChatbot = () => {
   const selectedDocObj = documents.find((d) => d.id === selectedDocId);
 
   const suggestedQuestions = [
-    'Explain the core concepts from Unit 1 with real exam examples.',
-    'Give me the answer to Question 5 from this question bank.',
-    'Summarize the entire PDF into 5 high-yield bullet points.',
-    'What are the most repeated 10-mark questions in this subject?',
+    'Give me the answer to Question 10 from DBMS QB with steps.',
+    'Explain the core concepts from Unit 1 with real exam examples in simple words.',
+    'Summarize this question bank into high-yield 9-pointer bullet points.',
+    'Generate 5 practice exam MCQs with explanations from this material.',
   ];
 
   return (
@@ -381,7 +466,12 @@ export const AIChatbot = () => {
                       )}
                     </div>
 
-                    <div className="whitespace-pre-wrap">{m.content}</div>
+                    <div className="whitespace-pre-wrap">
+                      {m.content}
+                      {m.isStreaming && (
+                        <span className="inline-block w-2 h-3.5 ml-1 bg-punch-red animate-pulse align-middle" />
+                      )}
+                    </div>
 
                     {/* Source citations tags */}
                     {m.sources && m.sources.length > 0 && (
@@ -411,11 +501,11 @@ export const AIChatbot = () => {
             })
           )}
 
-          {sending && (
+          {sending && (!messages[messages.length - 1]?.content) && (
             <div className="flex flex-col items-start">
               <div className="comic-box p-3 bg-white text-ink font-comic text-xs uppercase animate-pulse flex items-center gap-2">
                 <Bot className="w-4 h-4 text-punch-red animate-spin" />
-                <span>CONSULTING QUESTION BANK & GENERATING CITATIONS...</span>
+                <span>RETRIEVING QUESTION BANK CHUNKS & PREPARING ANSWER...</span>
               </div>
             </div>
           )}

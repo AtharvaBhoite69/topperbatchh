@@ -87,6 +87,19 @@ export const chatbot = {
   deleteConversation: (id) => api.delete(`/chatbot/conversations/${id}`),
 };
 
+export const mcqGenerator = {
+  generate: (formData) =>
+    api.post('/admin/mcq-generator/generate', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+  regenerateQuestion: (data) => api.post('/admin/mcq-generator/regenerate-question', data),
+  getDrafts: () => api.get('/admin/mcq-generator/drafts'),
+  getDraft: (id) => api.get(`/admin/mcq-generator/drafts/${id}`),
+  updateDraft: (id, data) => api.put(`/admin/mcq-generator/drafts/${id}`, data),
+  deleteDraft: (id) => api.delete(`/admin/mcq-generator/drafts/${id}`),
+  publish: (data) => api.post('/admin/mcq-generator/publish', data),
+};
+
 export const quiz = {
   getDaily: () => api.get('/quiz/daily'),
   getDailyHistory: () => api.get('/quiz/daily/history'),

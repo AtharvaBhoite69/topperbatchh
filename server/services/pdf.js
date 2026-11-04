@@ -1,17 +1,18 @@
 // =============================================================================
-// TopperBatch - PDF Processing Service
+// TopperBatch - Enhanced PDF Processing Service
 // =============================================================================
 
 const fs = require('fs');
 const path = require('path');
 
 /**
- * Extract text from a PDF file.
+ * Extract text from a PDF file preserving accurate per-page text content and line breaks.
+ * Uses pdf-parse's pagerender hook to accurately capture each page separately.
+ * 
  * @param {string} filePath - Absolute path to the PDF file
  * @returns {Promise<{text: string, pageCount: number, pages: Array<{pageNumber: number, content: string}>}>}
  */
 async function extractText(filePath) {
-  // Dynamic import for pdf-parse (CommonJS compatibility)
   const pdfParse = require('pdf-parse');
 
   if (!fs.existsSync(filePath)) {
@@ -21,40 +22,68 @@ async function extractText(filePath) {
   const dataBuffer = fs.readFileSync(filePath);
 
   try {
-    const data = await pdfParse(dataBuffer);
+    const rawPages = [];
+    let currentPageIndex = 1;
 
-    // pdf-parse doesn't provide per-page text out of the box
-    // We split by form-feed characters or by using heuristics
-    const fullText = data.text || '';
-    const pageCount = data.numpages || 1;
+    // Custom pagerender to capture exact text per page with natural linebreaks
+    const renderPage = (pageData) => {
+      const pageNum = currentPageIndex++;
+      return pageData.getTextContent({
+        normalizeWhitespace: false,
+        disableCombineTextItems: false,
+      }).then((textContent) => {
+        let lastY;
+        let pageText = '';
+        for (const item of textContent.items) {
+          if (lastY === undefined || lastY === item.transform[5]) {
+            pageText += (pageText.length > 0 && !pageText.endsWith(' ') && !pageText.endsWith('\n') ? ' ' : '') + item.str;
+          } else {
+            pageText += '\n' + item.str;
+          }
+          lastY = item.transform[5];
+        }
 
-    // Split text into pages using form-feed or heuristic
-    const rawPages = fullText.split(/\f/);
-    const pages = [];
+        const trimmed = pageText.trim();
+        rawPages.push({
+          pageNumber: pageNum,
+          content: trimmed,
+        });
 
-    for (let i = 0; i < pageCount; i++) {
-      pages.push({
-        pageNumber: i + 1,
-        content: rawPages[i] ? rawPages[i].trim() : '',
+        return trimmed;
       });
-    }
+    };
 
-    // If splitting didn't work well, put all text in page 1
-    if (pages.length === 0 || (pages.length === 1 && !pages[0].content && fullText.trim())) {
-      pages.length = 0;
-      pages.push({
-        pageNumber: 1,
-        content: fullText.trim(),
-      });
+    const parsedData = await pdfParse(dataBuffer, {
+      pagerender: renderPage,
+    });
+
+    const pageCount = parsedData.numpages || rawPages.length || 1;
+    const fullText = rawPages.map((p) => p.content).filter(Boolean).join('\n\n') || parsedData.text || '';
+
+    // If custom renderer did not produce pages (e.g. unexpected PDF format), fallback gracefully
+    let finalPages = rawPages;
+    if (finalPages.length === 0) {
+      const formFeedSplit = fullText.split(/\f/).map((c) => c.trim()).filter(Boolean);
+      if (formFeedSplit.length > 1) {
+        finalPages = formFeedSplit.map((content, idx) => ({
+          pageNumber: idx + 1,
+          content,
+        }));
+      } else {
+        finalPages = [{
+          pageNumber: 1,
+          content: fullText.trim(),
+        }];
+      }
     }
 
     return {
       text: fullText,
       pageCount,
-      pages,
+      pages: finalPages,
     };
   } catch (err) {
-    console.error('PDF parsing error:', err);
+    console.error('PDF parsing error:', err.message);
     throw new Error(`Failed to parse PDF: ${err.message}`);
   }
 }

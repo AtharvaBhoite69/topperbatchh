@@ -1,45 +1,74 @@
 // =============================================================================
-// TopperBatch - RAG (Retrieval-Augmented Generation) Pipeline
+// TopperBatch - High-Accuracy RAG (Retrieval-Augmented Generation) Pipeline
 // =============================================================================
 
 const { getDb } = require('../database/db');
 const { generateEmbedding } = require('./gemini');
 const { generateId } = require('../utils/helpers');
 
+// In-memory query embedding cache to avoid redundant API calls
+const queryEmbeddingCache = new Map();
+const MAX_CACHE_SIZE = 150;
+
 /**
- * Split text into overlapping chunks.
+ * Split text into semantic chunks with paragraph, question, and sentence boundary awareness.
  * @param {string} text - Text to chunk
- * @param {number} chunkSize - Target chunk size in characters
- * @param {number} overlap - Overlap in characters
+ * @param {number} chunkSize - Target chunk size in characters (default 1200)
+ * @param {number} overlap - Overlap in characters (default 150)
  * @returns {string[]} Array of text chunks
  */
-function splitIntoChunks(text, chunkSize = 500, overlap = 50) {
-  if (!text || text.length === 0) return [];
+function splitIntoChunks(text, chunkSize = 1200, overlap = 150) {
+  if (!text || text.trim().length === 0) return [];
+
+  const cleanedText = text.trim();
+  if (cleanedText.length <= chunkSize) {
+    return [cleanedText];
+  }
 
   const chunks = [];
   let start = 0;
 
-  while (start < text.length) {
+  // Question boundary markers to keep question prompts and answers unified
+  const questionPattern = /(?:^|\n)(?:Q\.?\s*\d+|Question\s*\d+|[0-9]{1,2}[\.\)])\s+/i;
+
+  while (start < cleanedText.length) {
     let end = start + chunkSize;
 
-    // Try to break at a sentence boundary
-    if (end < text.length) {
-      const lastPeriod = text.lastIndexOf('.', end);
-      const lastNewline = text.lastIndexOf('\n', end);
-      const breakPoint = Math.max(lastPeriod, lastNewline);
+    if (end < cleanedText.length) {
+      // Look for the best natural boundary between 50% and 100% of chunkSize
+      const searchWindow = cleanedText.substring(start + Math.floor(chunkSize * 0.5), end);
 
-      if (breakPoint > start + chunkSize * 0.5) {
-        end = breakPoint + 1;
+      // 1. Check for double line breaks (paragraphs)
+      const paragraphBreak = searchWindow.lastIndexOf('\n\n');
+      if (paragraphBreak !== -1) {
+        end = start + Math.floor(chunkSize * 0.5) + paragraphBreak + 2;
+      } else {
+        // 2. Check for sentence endings (.!?)
+        const lastPeriod = Math.max(
+          searchWindow.lastIndexOf('. '),
+          searchWindow.lastIndexOf('.\n'),
+          searchWindow.lastIndexOf('? '),
+          searchWindow.lastIndexOf('!\n')
+        );
+        if (lastPeriod !== -1) {
+          end = start + Math.floor(chunkSize * 0.5) + lastPeriod + 1;
+        } else {
+          // 3. Check for single newline
+          const lastNewline = searchWindow.lastIndexOf('\n');
+          if (lastNewline !== -1) {
+            end = start + Math.floor(chunkSize * 0.5) + lastNewline + 1;
+          }
+        }
       }
     }
 
-    const chunk = text.substring(start, Math.min(end, text.length)).trim();
-    if (chunk.length > 0) {
+    const chunk = cleanedText.substring(start, Math.min(end, cleanedText.length)).trim();
+    if (chunk.length > 20) {
       chunks.push(chunk);
     }
 
     start = end - overlap;
-    if (start >= text.length) break;
+    if (start >= cleanedText.length) break;
   }
 
   return chunks;
@@ -48,8 +77,9 @@ function splitIntoChunks(text, chunkSize = 500, overlap = 50) {
 /**
  * Index a document: extract pages, create chunks, generate embeddings.
  * @param {string} documentId - The document ID to index
+ * @param {boolean} force - Force re-index even if already marked indexed
  */
-async function indexDocument(documentId) {
+async function indexDocument(documentId, force = false) {
   const db = getDb();
 
   const document = db.prepare('SELECT * FROM documents WHERE id = ?').get(documentId);
@@ -57,9 +87,17 @@ async function indexDocument(documentId) {
     throw new Error(`Document not found: ${documentId}`);
   }
 
+  if (document.is_indexed && !force) {
+    const existingChunks = db.prepare('SELECT COUNT(*) as c FROM document_chunks WHERE document_id = ?').get(documentId);
+    if (existingChunks && existingChunks.c > 0) {
+      console.log(`ℹ️ Document ${documentId} is already indexed (${existingChunks.c} chunks).`);
+      return;
+    }
+  }
+
   // Get document pages
   const pages = db.prepare(
-    'SELECT * FROM document_pages WHERE document_id = ? ORDER BY page_number'
+    'SELECT * FROM document_pages WHERE document_id = ? ORDER BY page_number ASC'
   ).all(documentId);
 
   if (pages.length === 0) {
@@ -67,26 +105,13 @@ async function indexDocument(documentId) {
     return;
   }
 
-  // Delete existing chunks
+  // Delete existing chunks if re-indexing
   db.prepare('DELETE FROM document_chunks WHERE document_id = ?').run(documentId);
 
-  // Process each page
-  const insertChunk = db.prepare(
-    'INSERT INTO document_chunks (id, document_id, page_number, chunk_index, content, embedding) VALUES (?, ?, ?, ?, ?, ?)'
-  );
-
-  const insertMany = db.transaction((chunks) => {
-    for (const chunk of chunks) {
-      insertChunk.run(
-        chunk.id,
-        chunk.document_id,
-        chunk.page_number,
-        chunk.chunk_index,
-        chunk.content,
-        chunk.embedding
-      );
-    }
-  });
+  const insertChunk = db.prepare(`
+    INSERT INTO document_chunks (id, document_id, page_number, chunk_index, content, embedding)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
 
   const allChunks = [];
   let globalChunkIndex = 0;
@@ -94,131 +119,184 @@ async function indexDocument(documentId) {
   for (const page of pages) {
     if (!page.content || page.content.trim().length === 0) continue;
 
-    const chunks = splitIntoChunks(page.content);
+    const chunks = splitIntoChunks(page.content, 1200, 150);
 
     for (const chunkText of chunks) {
-      // Generate embedding if Gemini is available
-      let embeddingStr = null;
-      try {
-        const embedding = await generateEmbedding(chunkText);
-        if (embedding) {
-          embeddingStr = JSON.stringify(embedding);
-        }
-      } catch (err) {
-        // Continue without embedding
-        console.warn('Failed to generate embedding for chunk:', err.message);
-      }
-
       allChunks.push({
         id: generateId(),
         document_id: documentId,
         page_number: page.page_number,
         chunk_index: globalChunkIndex++,
         content: chunkText,
-        embedding: embeddingStr,
       });
     }
   }
 
+  // Generate embeddings with batch fallback
+  console.log(`⏳ Generating embeddings for ${allChunks.length} chunks of document "${document.title}"...`);
+  
+  for (const chunk of allChunks) {
+    let embeddingStr = null;
+    try {
+      const embedding = await generateEmbedding(chunk.content.slice(0, 800));
+      if (embedding) {
+        embeddingStr = JSON.stringify(embedding);
+      }
+    } catch (err) {
+      // Embedding failure is non-fatal; hybrid keyword search will handle it
+    }
+    chunk.embedding = embeddingStr;
+  }
+
   // Insert all chunks in a transaction
+  const insertMany = db.transaction((chunks) => {
+    for (const c of chunks) {
+      insertChunk.run(c.id, c.document_id, c.page_number, c.chunk_index, c.content, c.embedding);
+    }
+  });
+
   insertMany(allChunks);
 
   // Mark document as indexed
   db.prepare('UPDATE documents SET is_indexed = 1 WHERE id = ?').run(documentId);
 
-  console.log(`📄 Indexed document ${documentId}: ${allChunks.length} chunks created.`);
+  console.log(`✅ Indexed document "${document.title}": ${allChunks.length} chunks with page references.`);
 }
 
 /**
- * Search for relevant chunks using cosine similarity or keyword fallback.
+ * Search for relevant chunks using hybrid semantic embeddings + keyword matching.
+ * Scopes to a specific document or prioritizes documents mentioned in query.
+ * 
  * @param {string} query - Search query
- * @param {string} documentId - Optional document ID to scope search
- * @param {number} topK - Number of top results to return
+ * @param {string|null} documentId - Document ID to scope search
+ * @param {number} topK - Number of top results to return (default 5)
  * @returns {Promise<Array<{content: string, page_number: number, score: number, document_id: string}>>}
  */
 async function searchRelevantChunks(query, documentId = null, topK = 5) {
+  if (!query || !query.trim()) return [];
+
   const db = getDb();
+  let targetDocId = documentId;
 
-  // Try embedding-based search first
-  const queryEmbedding = await generateEmbedding(query);
+  // If no document selected, check if user mentioned a document title or topic in query
+  if (!targetDocId) {
+    const allDocs = db.prepare('SELECT id, title, topic FROM documents').all();
+    for (const doc of allDocs) {
+      const titleTerms = (doc.title || '').toLowerCase().split(/[\s_\-\.]+/).filter((t) => t.length > 3);
+      if (titleTerms.some((term) => query.toLowerCase().includes(term))) {
+        targetDocId = doc.id;
+        break;
+      }
+    }
+  }
 
+  // Fetch candidate chunks from DB
   let chunks;
-  if (documentId) {
+  if (targetDocId) {
     chunks = db.prepare(
-      'SELECT * FROM document_chunks WHERE document_id = ?'
-    ).all(documentId);
+      'SELECT id, document_id, page_number, chunk_index, content, embedding FROM document_chunks WHERE document_id = ?'
+    ).all(targetDocId);
   } else {
-    chunks = db.prepare('SELECT * FROM document_chunks').all();
+    // Top 300 most recent chunks if global
+    chunks = db.prepare(
+      'SELECT id, document_id, page_number, chunk_index, content, embedding FROM document_chunks ORDER BY created_at DESC LIMIT 300'
+    ).all();
   }
 
-  if (chunks.length === 0) return [];
-
-  if (queryEmbedding) {
-    // Cosine similarity search
-    const scored = chunks
-      .filter((chunk) => chunk.embedding)
-      .map((chunk) => {
-        const chunkEmbedding = JSON.parse(chunk.embedding);
-        const score = cosineSimilarity(queryEmbedding, chunkEmbedding);
-        return {
-          content: chunk.content,
-          page_number: chunk.page_number,
-          document_id: chunk.document_id,
-          score,
-        };
-      })
-      .sort((a, b) => b.score - a.score)
-      .slice(0, topK);
-
-    if (scored.length > 0) return scored;
+  if (!chunks || chunks.length === 0) {
+    return [];
   }
 
-  // Fallback: keyword-based search
-  return keywordSearch(chunks, query, topK);
-}
+  // Check for specific Question number request (e.g. "Question 10", "Q.10", "Q 10", "Question 5")
+  const questionNumberMatch = query.match(/(?:question|q\.?)\s*([0-9]{1,3})/i);
+  const targetQuestionNum = questionNumberMatch ? questionNumberMatch[1] : null;
 
-/**
- * Keyword-based search fallback when embeddings are not available.
- * @param {Array} chunks - Document chunks
- * @param {string} query - Search query
- * @param {number} topK - Number of top results
- * @returns {Array} Ranked chunks
- */
-function keywordSearch(chunks, query, topK) {
-  const queryTerms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+  // Obtain query embedding with cache
+  let queryEmbedding = null;
+  const cacheKey = query.trim().toLowerCase();
+  if (queryEmbeddingCache.has(cacheKey)) {
+    queryEmbedding = queryEmbeddingCache.get(cacheKey);
+  } else {
+    try {
+      queryEmbedding = await generateEmbedding(query.trim());
+      if (queryEmbedding) {
+        if (queryEmbeddingCache.size >= MAX_CACHE_SIZE) {
+          const firstKey = queryEmbeddingCache.keys().next().value;
+          queryEmbeddingCache.delete(firstKey);
+        }
+        queryEmbeddingCache.set(cacheKey, queryEmbedding);
+      }
+    } catch (_) {}
+  }
 
-  if (queryTerms.length === 0) return chunks.slice(0, topK).map((c) => ({
-    content: c.content,
-    page_number: c.page_number,
-    document_id: c.document_id,
-    score: 0,
-  }));
+  // Extract query keywords (terms of length >= 2 to support things like 'AI', 'OS', 'IP', 'Q1')
+  const queryTerms = query
+    .toLowerCase()
+    .replace(/[^\w\s]/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length >= 2);
 
-  const scored = chunks.map((chunk) => {
-    const content = chunk.content.toLowerCase();
-    let score = 0;
+  const scoredChunks = chunks.map((chunk) => {
+    let semanticScore = 0;
+    let keywordScore = 0;
+    const contentLower = chunk.content.toLowerCase();
 
+    // 1. Semantic Embedding Similarity
+    if (queryEmbedding && chunk.embedding) {
+      try {
+        const chunkVector = JSON.parse(chunk.embedding);
+        semanticScore = cosineSimilarity(queryEmbedding, chunkVector);
+      } catch (_) {}
+    }
+
+    // 2. Keyword Frequency & Exact Match Scoring
     for (const term of queryTerms) {
-      // Count occurrences
-      const matches = content.split(term).length - 1;
-      score += matches;
-
-      // Bonus for exact phrase match
-      if (content.includes(query.toLowerCase())) {
-        score += 5;
+      if (contentLower.includes(term)) {
+        keywordScore += 1;
+        // Whole word bonus
+        const regex = new RegExp(`\\b${term}\\b`, 'i');
+        if (regex.test(chunk.content)) {
+          keywordScore += 1.5;
+        }
       }
     }
 
+    // Phrase match bonus
+    if (contentLower.includes(query.toLowerCase().trim())) {
+      keywordScore += 10;
+    }
+
+    // 3. Question Number Specific Boost
+    if (targetQuestionNum) {
+      const qPatterns = [
+        new RegExp(`q\\.?\\s*${targetQuestionNum}\\b`, 'i'),
+        new RegExp(`question\\s*${targetQuestionNum}\\b`, 'i'),
+        new RegExp(`\\b${targetQuestionNum}[\\.\\)]\\s+`, 'i'),
+      ];
+      if (qPatterns.some((pattern) => pattern.test(chunk.content))) {
+        keywordScore += 25; // Massive boost to land the exact question
+      }
+    }
+
+    // Normalize keyword score between 0 and 1
+    const normalizedKeyword = Math.min(1, keywordScore / (queryTerms.length * 2 + 5));
+
+    // Combined score: when embedding exists, 60% semantic + 40% keyword; otherwise pure keyword
+    const finalScore = queryEmbedding && chunk.embedding
+      ? semanticScore * 0.6 + normalizedKeyword * 0.4
+      : normalizedKeyword;
+
     return {
+      id: chunk.id,
       content: chunk.content,
-      page_number: chunk.page_number,
+      page_number: chunk.page_number || 1,
       document_id: chunk.document_id,
-      score,
+      score: finalScore,
     };
   });
 
-  return scored
-    .filter((s) => s.score > 0)
+  return scoredChunks
+    .filter((c) => c.score > 0.05)
     .sort((a, b) => b.score - a.score)
     .slice(0, topK);
 }

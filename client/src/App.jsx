@@ -50,6 +50,7 @@ import ManageAnnouncements from './pages/admin/ManageAnnouncements';
 import AuditLogs from './pages/admin/AuditLogs';
 import PlatformSettings from './pages/admin/PlatformSettings';
 import SessionManagement from './pages/admin/SessionManagement';
+import MCQGenerator from './pages/admin/MCQGenerator';
 
 export const App = () => {
   return (
@@ -164,6 +165,14 @@ export const App = () => {
                 element={
                   <AdminRoute>
                     <ManageQuestions />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/admin/mcq-generator"
+                element={
+                  <AdminRoute>
+                    <MCQGenerator />
                   </AdminRoute>
                 }
               />

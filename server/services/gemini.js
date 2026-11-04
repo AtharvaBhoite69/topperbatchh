@@ -1,5 +1,5 @@
 // =============================================================================
-// TopperBatch - Gemini AI Service
+// TopperBatch - Google Gemini AI Service (Chat, RAG & Streaming)
 // =============================================================================
 
 const env = require('../config/env');
@@ -16,7 +16,7 @@ const MODEL_CANDIDATES = ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-flash-
  */
 function initGemini() {
   if (!env.GEMINI_API_KEY) {
-    console.warn('⚠️  Gemini API key not set. AI features will use fallback mode.');
+    console.warn('⚠️ GEMINI_API_KEY is not set. AI features will run in offline fallback mode.');
     return false;
   }
 
@@ -34,60 +34,86 @@ function initGemini() {
 }
 
 /**
- * Generate an answer using Gemini AI with context and chat history.
- * @param {string} context - Document context chunks
- * @param {string} question - User's question
- * @param {Array<{role: string, content: string}>} chatHistory - Previous messages
- * @returns {Promise<string>} Generated answer
+ * Build structured system prompt and contents payload for Gemini.
  */
-async function generateAnswer(context, question, chatHistory = []) {
-  if (!genAI) {
-    const initialized = initGemini();
-    if (!initialized) {
-      return 'AI features are not available right now. The Gemini API key is not configured. Please ask an admin to set it up.';
-    }
-  }
+function buildGeminiPayload(context, question, chatHistory = [], role = 'student') {
+  const isDocumentAttached = context && context.trim().length > 0;
 
-  const systemPrompt = `You are TopperBatch AI, a helpful academic assistant for the TopperBatch student community platform (tagline: "ISS SEM, 9 POINTER FIX!").
+  const systemPrompt = `You are TopperBatch AI, the premier academic study companion and syllabus mentor for the TopperBatch engineering community platform (motto: "ISS SEM, 9 POINTER FIX!").
+Your user is a verified ${role === 'admin' ? 'Platform Administrator / Professor' : 'Engineering Student'}.
 
-INSTRUCTIONS:
-- Answer questions thoroughly and accurately to help students prepare for their semester examinations.
-- If document context is provided below, prioritize it and cite the document name or page number.
-- If no document context is provided or if the topic is general, use your extensive academic knowledge to explain concepts step-by-step with formulas, bullet points, and exam examples.
-- Be concise, clear, and educational in your responses.
-- Use bullet points or numbered lists for readability.
+ACADEMIC DIRECTIVES:
+1. CITATIONS & VERIFIED SOURCES:
+   - When answering from the provided document context below, ALWAYS state the document name and specific page number: e.g. "📄 [Source: Document Name, Page X]".
+   - If the user asks for a specific question (e.g. "Question 10", "Q.4", "Module 2 Question 1"):
+     - If the question is in the document context below, provide the complete, step-by-step verified solution with equations, diagrams in ASCII/text, and clear bullet points.
+     - If that specific question number does NOT appear in the document context, state honestly:
+       "⚠️ I could not find [Question X] in the uploaded pages of the attached question bank."
+       Then, provide a helpful conceptual guide or syllabus answer based on general engineering knowledge, clearly noting that it is supplementary.
+     - NEVER invent false page numbers or pretend a question is on a page where it does not exist.
+
+2. CLARITY & EXPLANATION STYLE:
+   - Explain difficult engineering concepts in simple, intuitive language using real-world analogies.
+   - For numericals, derivations, or algorithms, explain step-by-step with clear formulas and intermediate steps.
+   - When asked to summarize, provide a high-yield summary highlighting definitions, key formulas, and exam tips.
+   - When asked for practice questions, provide 3 to 5 realistic semester exam-level MCQs or descriptive questions with hints.
+
+3. CONVERSATION CONTEXT:
+   - Retain conversational continuity from the preceding messages. If the user asks a follow-up question (e.g. "Can you explain step 2 further?"), answer directly with reference to the previous turns.
 
 DOCUMENT CONTEXT:
-${context || 'No specific document context attached. Answer using broad engineering & academic syllabus knowledge.'}`;
+${isDocumentAttached ? context : 'No specific document is currently attached. Answer using broad engineering curriculum knowledge.'}`;
 
-  // Build conversation history
-  const contents = [];
+  const contents = [
+    {
+      role: 'user',
+      parts: [{ text: systemPrompt }],
+    },
+    {
+      role: 'model',
+      parts: [{
+        text: 'Understood! I am TopperBatch AI, ready to help with verified question bank solutions, exact page citations, step-by-step engineering explanations, and 9-pointer exam mastery. What topic or question are we tackling?',
+      }],
+    },
+  ];
 
-  // Add system instruction as the initial user/model exchange
-  contents.push({
-    role: 'user',
-    parts: [{ text: systemPrompt }],
-  });
-  contents.push({
-    role: 'model',
-    parts: [{ text: 'Understood! I am TopperBatch AI, ready to help you score that 9-pointer with verified exam solutions and step-by-step concept explanations. How can I assist you?' }],
-  });
-
-  // Add past conversation turns
-  for (const msg of chatHistory) {
+  // Include recent chat history (compacted)
+  const recentHistory = chatHistory.slice(-6);
+  for (const msg of recentHistory) {
     contents.push({
       role: msg.role === 'user' ? 'user' : 'model',
       parts: [{ text: msg.content }],
     });
   }
 
-  // Add current user prompt
+  // Current prompt
   contents.push({
     role: 'user',
     parts: [{ text: question }],
   });
 
-  // Try candidate models with fallback
+  return contents;
+}
+
+/**
+ * Generate a complete answer using Gemini with candidate fallback.
+ * 
+ * @param {string} context - Document context retrieved via RAG
+ * @param {string} question - User question
+ * @param {Array} chatHistory - Array of past message objects { role, content }
+ * @param {string} role - 'student' or 'admin'
+ * @returns {Promise<string>} Generated answer
+ */
+async function generateAnswer(context, question, chatHistory = [], role = 'student') {
+  if (!genAI) {
+    const initialized = initGemini();
+    if (!initialized) {
+      return 'AI features are currently unavailable. The GEMINI_API_KEY is not configured on the server. Please check environment variables.';
+    }
+  }
+
+  const contents = buildGeminiPayload(context, question, chatHistory, role);
+
   let lastError = null;
   for (const modelName of MODEL_CANDIDATES) {
     try {
@@ -101,29 +127,78 @@ ${context || 'No specific document context attached. Answer using broad engineer
     }
   }
 
-  console.error('All Gemini model candidates failed:', lastError);
+  console.error('All Gemini model candidates failed in generateAnswer:', lastError?.message);
   if (lastError?.message && lastError.message.includes('API key')) {
-    return 'Gemini API key error. Please verify that your GEMINI_API_KEY is active and valid.';
+    return 'Gemini API key error. Please verify that your GEMINI_API_KEY is active and valid in your server configuration.';
   }
-  return 'I encountered a temporary service issue generating a response. Please try asking again in a moment.';
+  return 'I encountered a temporary service issue connecting to the AI provider. Please try asking again in a moment.';
 }
 
 /**
- * Generate an embedding vector for text.
+ * Stream an answer token-by-token using Gemini with candidate fallback.
+ * Async generator that yields text chunks.
+ * 
+ * @param {string} context
+ * @param {string} question
+ * @param {Array} chatHistory
+ * @param {string} role
+ * @returns {AsyncGenerator<string>} Yields text tokens
+ */
+async function* generateAnswerStream(context, question, chatHistory = [], role = 'student') {
+  if (!genAI) {
+    const initialized = initGemini();
+    if (!initialized) {
+      yield 'AI features are currently unavailable. The GEMINI_API_KEY is not configured on the server.';
+      return;
+    }
+  }
+
+  const contents = buildGeminiPayload(context, question, chatHistory, role);
+
+  let streamSuccess = false;
+  let lastError = null;
+
+  for (const modelName of MODEL_CANDIDATES) {
+    try {
+      const activeModel = genAI.getGenerativeModel({ model: modelName });
+      const result = await activeModel.generateContentStream({ contents });
+      
+      for await (const chunk of result.stream) {
+        const chunkText = chunk.text();
+        if (chunkText) {
+          yield chunkText;
+        }
+      }
+      streamSuccess = true;
+      break;
+    } catch (err) {
+      console.warn(`Gemini stream model ${modelName} warning:`, err.message);
+      lastError = err;
+    }
+  }
+
+  if (!streamSuccess) {
+    console.error('All Gemini model streaming candidates failed:', lastError?.message);
+    yield 'I encountered a temporary service issue generating a response. Please try asking again in a moment.';
+  }
+}
+
+/**
+ * Generate an embedding vector for text using gemini-embedding-001.
  * @param {string} text - Text to embed
  * @returns {Promise<number[]|null>} Embedding vector or null
  */
 async function generateEmbedding(text) {
-  if (!embeddingModel) {
+  if (!genAI) {
     const initialized = initGemini();
     if (!initialized) return null;
   }
 
   try {
-    const result = await embeddingModel.embedContent(text);
+    const activeEmbeddingModel = genAI.getGenerativeModel({ model: 'gemini-embedding-001' });
+    const result = await activeEmbeddingModel.embedContent(text);
     return result.embedding.values;
   } catch (err) {
-    console.error('Embedding generation error:', err);
     return null;
   }
 }
@@ -139,6 +214,7 @@ function isAvailable() {
 
 module.exports = {
   generateAnswer,
+  generateAnswerStream,
   generateEmbedding,
   isAvailable,
   initGemini,

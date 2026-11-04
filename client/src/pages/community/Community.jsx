@@ -103,10 +103,12 @@ export const Community = () => {
 
     fetchMessages(false);
 
-    // Live sync polling interval (2.5s) for environments like Vercel where WebSockets disconnect
+    // Smart fallback polling: only polls if Socket.IO is disconnected or unavailable
     const pollInterval = setInterval(() => {
-      fetchMessages(true);
-    }, 2500);
+      if (!socket || !socket.connected) {
+        fetchMessages(true);
+      }
+    }, 3500);
 
     if (socket) {
       socket.emit('join_channel', activeChannelId);

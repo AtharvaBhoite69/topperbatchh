@@ -1,5 +1,5 @@
 // =============================================================================
-// TopperBatch - AI Chatbot & RAG Routes
+// TopperBatch - AI Chatbot & High-Performance RAG Routes (with Streaming)
 // =============================================================================
 
 const express = require('express');
@@ -8,11 +8,54 @@ const router = express.Router();
 const { getDb } = require('../database/db');
 const { generateId } = require('../utils/helpers');
 const { authenticate, requireApproved } = require('../middleware/auth');
-const { generateAnswer } = require('../services/gemini');
+const { generateAnswer, generateAnswerStream } = require('../services/gemini');
 const { searchRelevantChunks } = require('../services/rag');
 
 // Authenticated & approved students/admins only
 router.use(authenticate, requireApproved);
+
+/**
+ * Helper to prepare RAG context and verified citations
+ */
+async function buildRAGContext(db, query, documentId) {
+  let relevantChunks = [];
+  let contextText = '';
+  let sources = [];
+
+  try {
+    relevantChunks = await searchRelevantChunks(query, documentId, 6);
+
+    if (relevantChunks.length > 0) {
+      // Collect document details for each chunk
+      const docCache = new Map();
+
+      for (const chunk of relevantChunks) {
+        if (!docCache.has(chunk.document_id)) {
+          const doc = db.prepare('SELECT title, original_name FROM documents WHERE id = ?').get(chunk.document_id);
+          docCache.set(chunk.document_id, doc ? (doc.title || doc.original_name) : 'Question Bank PDF');
+        }
+      }
+
+      contextText = relevantChunks
+        .map((chunk, idx) => {
+          const docName = docCache.get(chunk.document_id) || 'Uploaded PDF';
+          return `[Source ${idx + 1}: ${docName}, Page ${chunk.page_number || 1}]\n${chunk.content}`;
+        })
+        .join('\n\n---\n\n');
+
+      sources = relevantChunks.map((chunk) => ({
+        document_id: chunk.document_id,
+        document_name: docCache.get(chunk.document_id) || 'Uploaded PDF',
+        page_number: chunk.page_number || 1,
+        snippet: (chunk.content || '').replace(/\s+/g, ' ').slice(0, 160) + '...',
+      }));
+    }
+  } catch (ragErr) {
+    console.warn('RAG search warning:', ragErr.message);
+  }
+
+  return { contextText, sources };
+}
 
 /**
  * GET /api/chatbot/conversations
@@ -97,7 +140,6 @@ router.get('/conversations/:id', (req, res, next) => {
       ORDER BY created_at ASC
     `).all(id);
 
-    // Parse sources JSON
     const parsedMessages = messages.map((m) => ({
       ...m,
       sources: m.sources ? JSON.parse(m.sources) : [],
@@ -115,7 +157,7 @@ router.get('/conversations/:id', (req, res, next) => {
 
 /**
  * POST /api/chatbot/conversations/:id/messages
- * Send message, run RAG pipeline, and generate Gemini response
+ * Send message and generate standard JSON response
  */
 router.post('/conversations/:id/messages', async (req, res, next) => {
   try {
@@ -141,10 +183,9 @@ router.post('/conversations/:id/messages', async (req, res, next) => {
       VALUES (?, ?, 'user', ?)
     `).run(userMsgId, id, content.trim());
 
-    // Update conversation timestamp
     db.prepare("UPDATE chat_conversations SET updated_at = datetime('now') WHERE id = ?").run(id);
 
-    // Retrieve previous messages for chat context (last 6)
+    // Context from previous turns
     const historyRows = db.prepare(`
       SELECT role, content FROM chat_messages
       WHERE conversation_id = ? AND id != ?
@@ -152,45 +193,13 @@ router.post('/conversations/:id/messages', async (req, res, next) => {
       LIMIT 6
     `).all(id, userMsgId).reverse();
 
-    // RAG Search for relevant chunks
-    let relevantChunks = [];
-    let contextText = '';
-    let sources = [];
+    // RAG Search
+    const { contextText, sources } = await buildRAGContext(db, content.trim(), activeDocId);
 
-    if (activeDocId) {
-      try {
-        relevantChunks = await searchRelevantChunks(content.trim(), activeDocId, 5);
-        if (relevantChunks.length > 0) {
-          const docInfo = db.prepare('SELECT title, original_name FROM documents WHERE id = ?').get(activeDocId);
-          const docName = docInfo ? (docInfo.title || docInfo.original_name) : 'Selected PDF';
+    // Call Gemini
+    const aiResponseText = await generateAnswer(contextText, content.trim(), historyRows, req.user.role);
 
-          contextText = relevantChunks
-            .map((chunk, idx) => `[Source ${idx + 1}: ${docName}, Page ${chunk.page_number || 'N/A'}]\n${chunk.content}`)
-            .join('\n\n---\n\n');
-
-          sources = relevantChunks.map((chunk) => ({
-            document_id: activeDocId,
-            document_name: docName,
-            page_number: chunk.page_number || 1,
-            snippet: (chunk.content || '').slice(0, 160) + '...',
-          }));
-        }
-      } catch (ragErr) {
-        console.warn('RAG search warning:', ragErr.message);
-      }
-    }
-
-    // Call Gemini AI
-    let aiResponseText = '';
-    try {
-      aiResponseText = await generateAnswer(contextText, content.trim(), historyRows);
-    } catch (aiErr) {
-      console.error('Gemini call error:', aiErr.message);
-      aiResponseText =
-        'Sorry, I could not generate a response right now. Please verify that the GEMINI_API_KEY is configured properly in the server environment.';
-    }
-
-    // Save assistant response
+    // Save assistant message
     const assistantMsgId = generateId();
     db.prepare(`
       INSERT INTO chat_messages (id, conversation_id, role, content, sources)
@@ -214,6 +223,90 @@ router.post('/conversations/:id/messages', async (req, res, next) => {
 });
 
 /**
+ * POST /api/chatbot/conversations/:id/messages/stream
+ * High-performance Server-Sent Events (SSE) streaming endpoint
+ */
+router.post('/conversations/:id/messages/stream', async (req, res) => {
+  const { id } = req.params;
+  const { content, document_id } = req.body;
+
+  if (!content || !content.trim()) {
+    return res.status(400).json({ error: 'Message content cannot be empty.' });
+  }
+
+  const db = getDb();
+  const conv = db.prepare('SELECT * FROM chat_conversations WHERE id = ? AND user_id = ?').get(id, req.user.id);
+  if (!conv) {
+    return res.status(404).json({ error: 'Conversation not found.' });
+  }
+
+  const activeDocId = document_id || conv.document_id;
+
+  // Save user message
+  const userMsgId = generateId();
+  db.prepare(`
+    INSERT INTO chat_messages (id, conversation_id, role, content)
+    VALUES (?, ?, 'user', ?)
+  `).run(userMsgId, id, content.trim());
+
+  db.prepare("UPDATE chat_conversations SET updated_at = datetime('now') WHERE id = ?").run(id);
+
+  // Retrieve context
+  const historyRows = db.prepare(`
+    SELECT role, content FROM chat_messages
+    WHERE conversation_id = ? AND id != ?
+    ORDER BY created_at DESC
+    LIMIT 6
+  `).all(id, userMsgId).reverse();
+
+  // Set SSE Headers
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  // Perform RAG Search
+  const { contextText, sources } = await buildRAGContext(db, content.trim(), activeDocId);
+
+  // Send sources immediately to client
+  res.write(`data: ${JSON.stringify({ type: 'sources', sources })}\n\n`);
+
+  let completeAssistantResponse = '';
+  const assistantMsgId = generateId();
+
+  try {
+    for await (const token of generateAnswerStream(contextText, content.trim(), historyRows, req.user.role)) {
+      completeAssistantResponse += token;
+      res.write(`data: ${JSON.stringify({ type: 'token', token })}\n\n`);
+    }
+
+    // Save complete message into DB
+    db.prepare(`
+      INSERT INTO chat_messages (id, conversation_id, role, content, sources)
+      VALUES (?, ?, 'assistant', ?, ?)
+    `).run(assistantMsgId, id, completeAssistantResponse, JSON.stringify(sources));
+
+    res.write(`data: ${JSON.stringify({
+      type: 'done',
+      message: {
+        id: assistantMsgId,
+        conversation_id: id,
+        role: 'assistant',
+        content: completeAssistantResponse,
+        sources,
+        created_at: new Date().toISOString(),
+      },
+    })}\n\n`);
+  } catch (streamErr) {
+    console.error('SSE Stream error:', streamErr.message);
+    res.write(`data: ${JSON.stringify({ type: 'error', error: streamErr.message })}\n\n`);
+  } finally {
+    res.end();
+  }
+});
+
+/**
  * DELETE /api/chatbot/conversations/:id
  */
 router.delete('/conversations/:id', (req, res, next) => {
@@ -228,4 +321,3 @@ router.delete('/conversations/:id', (req, res, next) => {
 });
 
 module.exports = router;
-

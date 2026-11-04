@@ -28,6 +28,7 @@ const communityRoutes = require('./routes/community');
 const profileRoutes = require('./routes/profile');
 const notificationsRoutes = require('./routes/notifications');
 const searchRoutes = require('./routes/search');
+const mcqGeneratorRoutes = require('./routes/mcqGenerator');
 
 // Validate environment
 env.validateEnv();
@@ -77,6 +78,7 @@ app.use(generalLimiter);
 
 // API Routes - Mounted on both /api/* and /* to ensure serverless rewrites match seamlessly
 app.use(['/api/auth', '/auth'], authRoutes);
+app.use(['/api/admin/mcq-generator', '/admin/mcq-generator'], mcqGeneratorRoutes);
 app.use(['/api/admin', '/admin'], adminRoutes);
 app.use(['/api/documents', '/documents'], documentsRoutes);
 app.use(['/api/chatbot', '/chatbot'], chatbotRoutes);
