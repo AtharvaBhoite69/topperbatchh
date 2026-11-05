@@ -36,6 +36,11 @@ body {
   outline-offset: 2px;
 }
 
+/* Disable mobile long-press callout menu & drag */
+* {
+  -webkit-touch-callout: none;
+}
+
 /* Anti-Print & Anti-PDF Export Shield */
 @media print {
   html, body {
