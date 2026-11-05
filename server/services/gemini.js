@@ -57,6 +57,7 @@ ACADEMIC DIRECTIVES:
        "⚠️ I could not find [Question X] in the uploaded pages of the attached question bank."
        Then, provide a helpful conceptual guide or syllabus answer based on general engineering knowledge, clearly noting that it is supplementary.
      - NEVER invent false page numbers or pretend a question is on a page where it does not exist.
+   - CRITICAL: NEVER tell the student to upload or attach documents. All question banks, syllabi, and reference materials are managed centrally by the platform. Always analyze and answer using the DOCUMENT CONTEXT below and your deep syllabus knowledge.
 
 2. CLARITY & EXPLANATION STYLE:
    - Explain difficult engineering concepts in simple, intuitive language using real-world analogies.
@@ -68,7 +69,7 @@ ACADEMIC DIRECTIVES:
    - Retain conversational continuity from the preceding messages. If the user asks a follow-up question (e.g. "Can you explain step 2 further?"), answer directly with reference to the previous turns.
 
 DOCUMENT CONTEXT:
-${isDocumentAttached ? context : 'No specific document is currently attached. Answer using broad engineering curriculum knowledge.'}`;
+${isDocumentAttached ? context : 'Engineering Syllabus & Question Bank Materials are active. Answer questions directly using engineering curriculum knowledge.'}`;
 
   const contents = [
     {

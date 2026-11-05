@@ -26,7 +26,20 @@ async function buildRAGContext(db, query, documentId) {
   try {
     relevantChunks = await searchRelevantChunks(query, documentId, 6);
 
-    if (relevantChunks.length > 0) {
+    // If search didn't yield chunks, fallback to top chunks from available documents
+    if (!relevantChunks || relevantChunks.length === 0) {
+      if (documentId) {
+        relevantChunks = await db.prepare(
+          'SELECT id, document_id, page_number, chunk_index, content FROM document_chunks WHERE document_id = ? ORDER BY chunk_index ASC LIMIT 6'
+        ).all(documentId);
+      } else {
+        relevantChunks = await db.prepare(
+          'SELECT id, document_id, page_number, chunk_index, content FROM document_chunks ORDER BY created_at DESC LIMIT 6'
+        ).all();
+      }
+    }
+
+    if (relevantChunks && relevantChunks.length > 0) {
       // Collect document details for each chunk
       const docCache = new Map();
 

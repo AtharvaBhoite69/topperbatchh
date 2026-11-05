@@ -46,7 +46,12 @@ export const AIChatbot = () => {
         ]);
 
         if (docsRes.data?.success) {
-          setDocuments(docsRes.data.documents || []);
+          const docs = docsRes.data.documents || [];
+          setDocuments(docs);
+          // If no doc preselected and documents exist, auto-select the first active document
+          if (!preSelectedDocId && docs.length > 0) {
+            setSelectedDocId(docs[0].id);
+          }
         }
 
         if (convRes.data?.success) {
@@ -365,20 +370,38 @@ export const AIChatbot = () => {
       {/* Main Chat Arena */}
       <div className="flex-1 comic-box bg-white flex flex-col justify-between overflow-hidden shadow-[6px_6px_0px_#171510] min-h-0">
         {/* Header Bar */}
-        <div className="p-2.5 sm:p-3.5 border-b-[3px] border-ink bg-cream flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+        <div className="p-2 sm:p-3.5 border-b-[3px] border-ink bg-cream flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
             <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-md bg-punch-red text-cream flex items-center justify-center border-2 border-ink shadow-[2px_2px_0px_#171510] flex-shrink-0">
               <Bot className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div className="min-w-0">
-              <h2 className="font-heading text-sm sm:text-lg uppercase tracking-wide text-ink truncate">
-                TOPPER AI COMPANION
-              </h2>
-              <div className="font-mono text-[9px] sm:text-[10px] text-olive-dark truncate flex items-center gap-1">
-                <span>RAG:</span>
-                <strong className="text-punch-red truncate">
-                  {selectedDocObj ? selectedDocObj.title : 'All Question Banks'}
-                </strong>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <h2 className="font-heading text-xs sm:text-lg uppercase tracking-wide text-ink truncate">
+                  TOPPER AI COMPANION
+                </h2>
+                {selectedDocObj && (
+                  <span className="hidden sm:inline-flex font-comic text-[9px] bg-victory-green text-cream px-1.5 py-0.2 rounded border border-ink shadow-[1px_1px_0px_#171510] uppercase font-bold">
+                    LOCKED
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1 mt-0.5">
+                <span className="font-mono text-[9px] sm:text-[10px] text-olive-dark font-bold flex-shrink-0">
+                  DOC:
+                </span>
+                <select
+                  value={selectedDocId}
+                  onChange={(e) => setSelectedDocId(e.target.value)}
+                  className="bg-white border-2 border-ink text-[10px] sm:text-xs rounded px-1.5 py-0.5 font-mono truncate max-w-[170px] sm:max-w-[340px] shadow-[1px_1px_0px_#171510] font-bold"
+                >
+                  <option value="">All Question Banks (Global)</option>
+                  {documents.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.title}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>
@@ -388,16 +411,10 @@ export const AIChatbot = () => {
             <button
               type="button"
               onClick={() => setMobileDrawerOpen((prev) => !prev)}
-              className="lg:hidden comic-btn comic-btn-yellow text-[11px] sm:text-xs px-2 sm:px-2.5 py-1 font-comic flex items-center gap-1 shadow-[2px_2px_0px_#171510]"
+              className="lg:hidden comic-btn comic-btn-yellow text-[10px] sm:text-xs px-2 py-1 font-comic flex items-center gap-1 shadow-[2px_2px_0px_#171510]"
             >
-              <span>{mobileDrawerOpen ? '✕ CHAT' : `💬 SESSIONS (${conversations.length})`}</span>
+              <span>{mobileDrawerOpen ? '✕ CHAT' : `💬 SESSIONS`}</span>
             </button>
-
-            {selectedDocObj && (
-              <span className="hidden md:inline-flex font-comic text-[10px] bg-victory-green text-cream px-2 py-0.5 rounded border border-ink shadow-[1px_1px_0px_#171510] uppercase">
-                TARGET LOCKED
-              </span>
-            )}
           </div>
         </div>
 

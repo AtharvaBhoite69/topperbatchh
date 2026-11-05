@@ -291,10 +291,24 @@ async function searchRelevantChunks(query, documentId = null, topK = 5) {
     };
   });
 
-  return scoredChunks
+  const filtered = scoredChunks
     .filter((c) => c.score > 0.05)
     .sort((a, b) => b.score - a.score)
     .slice(0, topK);
+
+  // Fallback: If no chunks scored > 0.05 (e.g. user asked generic "read document", "summarize", or "overview"),
+  // return the first chunks of the targeted document or available documents so context is never empty!
+  if (filtered.length === 0 && chunks.length > 0) {
+    return chunks.slice(0, topK).map((c) => ({
+      id: c.id,
+      content: c.content,
+      page_number: c.page_number || 1,
+      document_id: c.document_id,
+      score: 0.2,
+    }));
+  }
+
+  return filtered;
 }
 
 /**
