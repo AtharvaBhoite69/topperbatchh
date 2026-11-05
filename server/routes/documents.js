@@ -17,6 +17,7 @@ const { indexDocument } = require('../services/rag');
 const {
   uploadToStorage,
   getSignedDownloadUrl,
+  deleteFromStorage,
   BUCKET_DOCUMENTS,
 } = require('../services/supabaseStorage');
 
@@ -462,7 +463,7 @@ router.put('/:id', requireAdmin, async (req, res, next) => {
 
 /**
  * DELETE /api/documents/:id
- * Delete document and remove stored file
+ * Delete document, unbind foreign key dependencies, remove RAG chunks, and clean up storage.
  */
 router.delete('/:id', requireAdmin, async (req, res, next) => {
   try {
@@ -474,14 +475,45 @@ router.delete('/:id', requireAdmin, async (req, res, next) => {
       return res.status(404).json({ error: 'Document not found.' });
     }
 
+    // 1. Unlink foreign references in chat conversations and MCQs so chat histories are preserved
+    try {
+      await db.prepare('UPDATE chat_conversations SET document_id = NULL WHERE document_id = ?').run(id);
+    } catch (_) {}
+
+    try {
+      await db.prepare('UPDATE questions SET document_id = NULL WHERE document_id = ?').run(id);
+    } catch (_) {}
+
+    try {
+      await db.prepare('UPDATE mcq_draft_sessions SET document_id = NULL WHERE document_id = ?').run(id);
+    } catch (_) {}
+
+    // 2. Cascade delete dependent child records (bookmarks, RAG vector chunks, extracted pages)
+    try {
+      await db.prepare('DELETE FROM saved_documents WHERE document_id = ?').run(id);
+    } catch (_) {}
+
+    try {
+      await db.prepare('DELETE FROM document_chunks WHERE document_id = ?').run(id);
+    } catch (_) {}
+
+    try {
+      await db.prepare('DELETE FROM document_pages WHERE document_id = ?').run(id);
+    } catch (_) {}
+
+    // 3. Delete document row from documents table
     await db.prepare('DELETE FROM documents WHERE id = ?').run(id);
 
-    const filePath = path.join(uploadDir, doc.filename);
-    if (fs.existsSync(filePath)) {
-      try {
-        fs.unlinkSync(filePath);
-      } catch (e) {
-        console.warn('File cleanup failed:', e.message);
+    // 4. Clean up cloud storage and local temp file
+    if (doc.filename) {
+      await deleteFromStorage(BUCKET_DOCUMENTS, doc.filename);
+      const filePath = path.join(uploadDir, doc.filename);
+      if (fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+        } catch (e) {
+          console.warn('File cleanup failed:', e.message);
+        }
       }
     }
 

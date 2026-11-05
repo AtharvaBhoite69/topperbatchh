@@ -64,7 +64,8 @@ export const ManageDocuments = () => {
       setDocuments((prev) => prev.filter((d) => d.id !== id));
       toast.success('Document deleted from vault.');
     } catch (err) {
-      toast.error('Failed to delete document.');
+      const errMsg = err.response?.data?.error || err.response?.data?.details || 'Failed to delete document.';
+      toast.error(errMsg);
     }
   };
 

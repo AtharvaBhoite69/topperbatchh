@@ -143,6 +143,20 @@ async function downloadFromStorage(bucket, remoteFilename) {
   }
 }
 
+/**
+ * Delete a file from private Supabase Storage.
+ */
+async function deleteFromStorage(bucket, remoteFilename) {
+  const client = getSupabaseAdmin();
+  if (!client || !remoteFilename) return;
+
+  try {
+    await client.storage.from(bucket).remove([remoteFilename]);
+  } catch (err) {
+    console.warn(`Supabase Storage deletion warning (${err.message}) for ${remoteFilename}`);
+  }
+}
+
 module.exports = {
   BUCKET_DOCUMENTS,
   BUCKET_COMMUNITY,
@@ -151,5 +165,6 @@ module.exports = {
   uploadToStorage,
   getSignedDownloadUrl,
   downloadFromStorage,
+  deleteFromStorage,
 };
 
