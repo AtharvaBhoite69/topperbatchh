@@ -137,35 +137,33 @@ export const ScreenshotProtector = ({ children }) => {
       }
     };
 
-    // 2. Mobile Hardware Screenshot Capture Signature (Power + Volume Down flash)
-    // When a screenshot is taken on Android/iOS, the system overlay steals focus momentarily (100ms - 1500ms).
+    // 2. Hardware / Snipping Tool Screenshot Signature
+    // When a screenshot is taken (Windows Snipping Tool, Mac Cmd+Shift+4, Android/iOS Power+Volume),
+    // the system overlay steals focus momentarily.
     let blurTime = 0;
-    const isTouchDevice = () => 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
     const handleBlur = () => {
-      if (isTouchDevice()) {
-        blurTime = Date.now();
-      }
+      blurTime = Date.now();
     };
 
     const handleFocus = () => {
       if (blurTime > 0) {
         const duration = Date.now() - blurTime;
         blurTime = 0;
-        // Exact time signature of OS screenshot shutter animation / preview dialog
-        if (duration >= 80 && duration <= 1600 && isTouchDevice()) {
+        // OS screenshot overlay / Snipping tool animation duration
+        if (duration >= 100 && duration <= 6000) {
           triggerEasterEgg();
         }
       }
     };
 
     const handleVisibilityChange = () => {
-      if (document.hidden && isTouchDevice()) {
+      if (document.hidden) {
         blurTime = Date.now();
       } else if (!document.hidden && blurTime > 0) {
         const duration = Date.now() - blurTime;
         blurTime = 0;
-        if (duration >= 80 && duration <= 1600 && isTouchDevice()) {
+        if (duration >= 100 && duration <= 6000) {
           triggerEasterEgg();
         }
       }
@@ -174,7 +172,7 @@ export const ScreenshotProtector = ({ children }) => {
     // 3. Desktop Keyboard Handlers (PrintScreen, Snipping tool, Ctrl+P)
     const handleKeyDown = (e) => {
       // PrintScreen key
-      if (e.key === 'PrintScreen' || e.keyCode === 44) {
+      if (e.key === 'PrintScreen' || e.code === 'PrintScreen' || e.keyCode === 44) {
         e.preventDefault();
         triggerEasterEgg();
         return false;
@@ -187,7 +185,7 @@ export const ScreenshotProtector = ({ children }) => {
         return false;
       }
 
-      // Snipping tool shortcut (Ctrl+Shift+S / Cmd+Shift+3/4)
+      // Snipping tool shortcut (Ctrl+Shift+S / Cmd+Shift+3/4 / Win+Shift+S)
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 's' || e.key === 'S')) {
         e.preventDefault();
         triggerEasterEgg();
@@ -197,7 +195,7 @@ export const ScreenshotProtector = ({ children }) => {
 
     // Also listen on keyup (Windows Chrome delivers PrintScreen on keyup)
     const handleKeyUp = (e) => {
-      if (e.key === 'PrintScreen' || e.keyCode === 44) {
+      if (e.key === 'PrintScreen' || e.code === 'PrintScreen' || e.keyCode === 44) {
         triggerEasterEgg();
       }
     };
