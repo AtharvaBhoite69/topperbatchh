@@ -314,12 +314,6 @@ export const ScreenshotProtector = ({ children }) => {
                 src="/easter-egg-meme.gif"
                 alt="Kya re bhik mangya!"
                 className="w-full max-h-[260px] sm:max-h-[310px] object-contain mx-auto rounded border-[3px] border-ink shadow-[4px_4px_0px_#171510] bg-ink/5"
-                onError={(e) => {
-                  // Fallback to jpg copy if gif extension is blocked
-                  if (e.target.src.endsWith('.gif')) {
-                    e.target.src = '/easter-egg-meme.jpg';
-                  }
-                }}
               />
             </div>
 
