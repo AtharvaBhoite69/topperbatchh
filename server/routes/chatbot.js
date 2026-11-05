@@ -50,7 +50,21 @@ async function buildRAGContext(db, query, documentId) {
         }
       }
 
-      contextText = relevantChunks
+      // Add Active Document banner so Gemini immediately detects and announces the loaded question bank
+      let activeDocBanner = '';
+      if (documentId) {
+        const activeDoc = await db.prepare('SELECT title, original_name, page_count FROM documents WHERE id = ?').get(documentId);
+        if (activeDoc) {
+          activeDocBanner = `=== ACTIVE LOADED DOCUMENT: "${activeDoc.title || activeDoc.original_name}" (${activeDoc.page_count || 1} Pages) ===\n\n`;
+        }
+      } else {
+        const topDoc = await db.prepare('SELECT title, original_name, page_count FROM documents WHERE is_visible = 1 ORDER BY created_at DESC LIMIT 1').get();
+        if (topDoc) {
+          activeDocBanner = `=== ACTIVE LOADED QUESTION BANK: "${topDoc.title || topDoc.original_name}" (${topDoc.page_count || 1} Pages) ===\n\n`;
+        }
+      }
+
+      contextText = activeDocBanner + relevantChunks
         .map((chunk, idx) => {
           const docName = docCache.get(chunk.document_id) || 'Uploaded PDF';
           return `[Source ${idx + 1}: ${docName}, Page ${chunk.page_number || 1}]\n${chunk.content}`;
