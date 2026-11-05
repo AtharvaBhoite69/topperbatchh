@@ -112,9 +112,19 @@ router.get('/conversations', async (req, res, next) => {
  */
 router.post('/conversations', async (req, res, next) => {
   try {
-    const { title, document_id } = req.body;
+    let { title, document_id } = req.body;
     const db = getDb();
     const convId = generateId();
+
+    // Automatically bind to the active Question Bank if not specified
+    if (!document_id) {
+      const defaultDoc = await db.prepare(
+        'SELECT id, title FROM documents WHERE is_visible = 1 ORDER BY created_at DESC LIMIT 1'
+      ).get();
+      if (defaultDoc) {
+        document_id = defaultDoc.id;
+      }
+    }
 
     let docTitle = null;
     if (document_id) {
@@ -202,7 +212,11 @@ router.post('/conversations/:id/messages', async (req, res, next) => {
       return res.status(404).json({ error: 'Conversation not found.' });
     }
 
-    const activeDocId = document_id || conv.document_id;
+    let activeDocId = document_id || conv.document_id;
+    if (!activeDocId) {
+      const topDoc = await db.prepare('SELECT id FROM documents WHERE is_visible = 1 ORDER BY created_at DESC LIMIT 1').get();
+      if (topDoc) activeDocId = topDoc.id;
+    }
 
     // Save user message
     const userMsgId = generateId();
@@ -268,7 +282,11 @@ router.post('/conversations/:id/messages/stream', async (req, res) => {
     return res.status(404).json({ error: 'Conversation not found.' });
   }
 
-  const activeDocId = document_id || conv.document_id;
+  let activeDocId = document_id || conv.document_id;
+  if (!activeDocId) {
+    const topDoc = await db.prepare('SELECT id FROM documents WHERE is_visible = 1 ORDER BY created_at DESC LIMIT 1').get();
+    if (topDoc) activeDocId = topDoc.id;
+  }
 
   // Save user message
   const userMsgId = generateId();

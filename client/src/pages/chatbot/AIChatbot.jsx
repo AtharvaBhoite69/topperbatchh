@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import ComicButton from '../../components/ui/ComicButton';
 import ComicCard from '../../components/ui/ComicCard';
 import { ComicBadge } from '../../components/ui/ComicElements';
+import { FormattedMessage } from '../../components/chat/FormattedMessage';
 import { chatbot as chatApi, documents as docApi } from '../../services/api';
 import {
   Bot,
@@ -483,12 +484,13 @@ export const AIChatbot = () => {
                       )}
                     </div>
 
-                    <div className="whitespace-pre-wrap">
-                      {m.content}
-                      {m.isStreaming && (
-                        <span className="inline-block w-2 h-3.5 ml-1 bg-punch-red animate-pulse align-middle" />
-                      )}
-                    </div>
+                    {isUser ? (
+                      <div className="whitespace-pre-wrap font-sans text-xs sm:text-sm leading-relaxed">
+                        {m.content}
+                      </div>
+                    ) : (
+                      <FormattedMessage content={m.content} isStreaming={m.isStreaming} />
+                    )}
 
                     {/* Source citations tags */}
                     {m.sources && m.sources.length > 0 && (
