@@ -124,101 +124,128 @@ export const ScreenshotProtector = ({ children }) => {
     window.addEventListener('keydown', recordInteraction, { once: true });
     window.addEventListener('touchstart', recordInteraction, { once: true });
 
-    // 1. Mobile 3-Finger Screenshot Gesture (Universal on Xiaomi, OnePlus, Realme, Oppo, Samsung)
-    const handleTouchStart = (e) => {
+    // 1. Mobile 3-Finger Screenshot Gesture (Universal on Xiaomi, OnePlus, Realme, Oppo, Samsung, Vivo, etc.)
+    const activePointers = new Set();
+
+    const handleTouch = (e) => {
       recordInteraction();
-      if (e.touches && e.touches.length >= 3) {
+      const count =
+        (e.touches && e.touches.length) ||
+        (e.targetTouches && e.targetTouches.length) ||
+        0;
+      if (count >= 3) {
         triggerEasterEgg();
       }
     };
-    const handleTouchMove = (e) => {
-      if (e.touches && e.touches.length >= 3) {
+
+    const handlePointerDown = (e) => {
+      recordInteraction();
+      activePointers.add(e.pointerId);
+      if (activePointers.size >= 3) {
         triggerEasterEgg();
       }
     };
 
-    // 2. Hardware / Snipping Tool Screenshot Signature
-    // When a screenshot is taken (Windows Snipping Tool, Mac Cmd+Shift+4, Android/iOS Power+Volume),
-    // the system overlay steals focus momentarily.
-    let blurTime = 0;
-
-    const handleBlur = () => {
-      blurTime = Date.now();
+    const handlePointerUp = (e) => {
+      activePointers.delete(e.pointerId);
     };
 
-    const handleFocus = () => {
-      if (blurTime > 0) {
-        const duration = Date.now() - blurTime;
-        blurTime = 0;
-        // OS screenshot overlay / Snipping tool animation duration
-        if (duration >= 100 && duration <= 6000) {
-          triggerEasterEgg();
-        }
-      }
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        blurTime = Date.now();
-      } else if (!document.hidden && blurTime > 0) {
-        const duration = Date.now() - blurTime;
-        blurTime = 0;
-        if (duration >= 100 && duration <= 6000) {
-          triggerEasterEgg();
-        }
-      }
-    };
-
-    // 3. Desktop Keyboard Handlers (PrintScreen, Snipping tool, Ctrl+P)
+    // 2. Desktop Keyboard Handlers (PrintScreen, Snipping tool, macOS, Ctrl+P)
     const handleKeyDown = (e) => {
-      // PrintScreen key
-      if (e.key === 'PrintScreen' || e.code === 'PrintScreen' || e.keyCode === 44) {
+      recordInteraction();
+
+      // PrintScreen key (Windows, Linux, Chromebooks)
+      if (
+        e.key === 'PrintScreen' ||
+        e.code === 'PrintScreen' ||
+        e.keyCode === 44 ||
+        e.which === 44
+      ) {
         e.preventDefault();
         triggerEasterEgg();
         return false;
       }
 
-      // Ctrl+P / Cmd+P (Print to PDF)
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P' || e.keyCode === 80)) {
+      // Windows Snipping tool shortcut (Ctrl+Shift+S / Win+Shift+S / Shift+PrtScn)
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        e.shiftKey &&
+        (e.key === 's' || e.key === 'S' || e.code === 'KeyS')
+      ) {
         e.preventDefault();
         triggerEasterEgg();
         return false;
       }
 
-      // Snipping tool shortcut (Ctrl+Shift+S / Cmd+Shift+3/4 / Win+Shift+S)
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 's' || e.key === 'S')) {
+      // macOS Screenshot Shortcuts: Cmd+Shift+3, Cmd+Shift+4, Cmd+Shift+5
+      if (
+        e.metaKey &&
+        e.shiftKey &&
+        ['3', '4', '5', '$', '%', '#'].includes(e.key)
+      ) {
+        e.preventDefault();
+        triggerEasterEgg();
+        return false;
+      }
+
+      // Ctrl+P / Cmd+P (Print to PDF / Browser print dialog)
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        (e.key === 'p' || e.key === 'P' || e.code === 'KeyP' || e.keyCode === 80)
+      ) {
         e.preventDefault();
         triggerEasterEgg();
         return false;
       }
     };
 
-    // Also listen on keyup (Windows Chrome delivers PrintScreen on keyup)
+    // Keyup for Windows Chrome / Edge which fires PrtScn only on keyup
     const handleKeyUp = (e) => {
-      if (e.key === 'PrintScreen' || e.code === 'PrintScreen' || e.keyCode === 44) {
+      if (
+        e.key === 'PrintScreen' ||
+        e.code === 'PrintScreen' ||
+        e.keyCode === 44 ||
+        e.which === 44
+      ) {
         triggerEasterEgg();
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    window.addEventListener('touchstart', handleTouchStart, { passive: true });
-    window.addEventListener('touchmove', handleTouchMove, { passive: true });
-    window.addEventListener('blur', handleBlur);
-    window.addEventListener('focus', handleFocus);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    // Browser Print Event (catches browser-menu "Print" / "Save as PDF")
+    const handleBeforePrint = () => {
+      triggerEasterEgg();
+    };
+
+    // Attach high-priority capture-phase listeners for zero-delay response
+    window.addEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('keyup', handleKeyUp, true);
+    window.addEventListener('beforeprint', handleBeforePrint);
+
+    window.addEventListener('touchstart', handleTouch, { capture: true, passive: true });
+    window.addEventListener('touchmove', handleTouch, { capture: true, passive: true });
+    window.addEventListener('touchend', handleTouch, { capture: true, passive: true });
+
+    window.addEventListener('pointerdown', handlePointerDown, { capture: true, passive: true });
+    window.addEventListener('pointerup', handlePointerUp, { capture: true, passive: true });
+    window.addEventListener('pointercancel', handlePointerUp, { capture: true, passive: true });
 
     return () => {
       window.removeEventListener('click', recordInteraction);
       window.removeEventListener('keydown', recordInteraction);
       window.removeEventListener('touchstart', recordInteraction);
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-      window.removeEventListener('touchstart', handleTouchStart);
-      window.removeEventListener('touchmove', handleTouchMove);
-      window.removeEventListener('blur', handleBlur);
-      window.removeEventListener('focus', handleFocus);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+
+      window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('keyup', handleKeyUp, true);
+      window.removeEventListener('beforeprint', handleBeforePrint);
+
+      window.removeEventListener('touchstart', handleTouch, true);
+      window.removeEventListener('touchmove', handleTouch, true);
+      window.removeEventListener('touchend', handleTouch, true);
+
+      window.removeEventListener('pointerdown', handlePointerDown, true);
+      window.removeEventListener('pointerup', handlePointerUp, true);
+      window.removeEventListener('pointercancel', handlePointerUp, true);
+
       if (timerRef.current) clearTimeout(timerRef.current);
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
