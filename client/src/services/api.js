@@ -19,10 +19,17 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      // Don't redirect if already on auth pages
-      const authPaths = ['/login', '/register', '/forgot-password', '/reset-password'];
+      // Never redirect if this is the background session check
+      if (err.config?.url?.includes('/auth/me')) {
+        return Promise.reject(err);
+      }
+
+      // Don't redirect if already on public pages (landing, login, register, etc.)
+      const publicPaths = ['/', '/login', '/register', '/forgot-password', '/reset-password'];
       const currentPath = window.location.pathname;
-      if (!authPaths.some((p) => currentPath.startsWith(p))) {
+      const isPublic = publicPaths.some((p) => (p === '/' ? currentPath === '/' : currentPath.startsWith(p)));
+
+      if (!isPublic) {
         window.location.href = '/login';
       }
     }

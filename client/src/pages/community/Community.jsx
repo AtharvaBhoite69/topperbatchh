@@ -25,6 +25,7 @@ import {
   File,
   ShieldCheck,
   Radio,
+  ChevronLeft,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -40,6 +41,7 @@ export const Community = () => {
   const [loading, setLoading] = useState(true);
   const [typingUser, setTypingUser] = useState(null);
   const [isRealtimeActive, setIsRealtimeActive] = useState(false);
+  const [showMobileChannels, setShowMobileChannels] = useState(false);
 
   // File upload state for Notes & Resources
   const [attachedFile, setAttachedFile] = useState(null);
@@ -469,22 +471,36 @@ export const Community = () => {
   return (
     <div className="flex h-[calc(100vh-140px)] border-[3px] border-ink bg-white shadow-comic overflow-hidden">
       {/* 1. Channels Sidebar */}
-      <div className="w-64 sm:w-72 border-r-[3px] border-ink bg-cream/40 flex flex-col flex-shrink-0">
+      <div
+        className={`${
+          showMobileChannels ? 'flex w-full' : 'hidden md:flex md:w-72'
+        } border-r-[3px] border-ink bg-cream/40 flex-col flex-shrink-0 transition-all`}
+      >
         <div className="p-4 border-b-[3px] border-ink bg-comic-yellow flex items-center justify-between">
           <div className="flex items-center gap-2">
             <h3 className="font-heading text-lg uppercase tracking-wide text-ink">CHANNELS</h3>
             <span className="font-mono text-xs bg-ink text-white px-1.5 py-0.5 rounded font-bold">3</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span
-              className={`w-2.5 h-2.5 rounded-full border border-ink ${
-                isRealtimeActive ? 'bg-victory-green animate-pulse' : 'bg-punch-red'
-              }`}
-              title={isRealtimeActive ? 'Supabase Realtime Live' : 'Polling Live Sync'}
-            />
-            <span className="font-comic text-[10px] uppercase text-ink font-bold">
-              {isRealtimeActive ? 'REALTIME' : 'LIVE'}
-            </span>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <span
+                className={`w-2.5 h-2.5 rounded-full border border-ink ${
+                  isRealtimeActive ? 'bg-victory-green animate-pulse' : 'bg-punch-red'
+                }`}
+                title={isRealtimeActive ? 'Supabase Realtime Live' : 'Polling Live Sync'}
+              />
+              <span className="font-comic text-[10px] uppercase text-ink font-bold">
+                {isRealtimeActive ? 'REALTIME' : 'LIVE'}
+              </span>
+            </div>
+            {/* Close button on mobile */}
+            <button
+              onClick={() => setShowMobileChannels(false)}
+              className="md:hidden p-1 rounded bg-cream border-2 border-ink text-ink shadow-[1px_1px_0px_#171510] active:scale-95"
+              title="Close channels list"
+            >
+              <X className="w-4 h-4 stroke-[2.5]" />
+            </button>
           </div>
         </div>
 
@@ -506,6 +522,7 @@ export const Community = () => {
                     setActiveChannelId(chan.id);
                     setReplyTo(null);
                     setAttachedFile(null);
+                    setShowMobileChannels(false);
                   }}
                   className={`w-full text-left p-3 rounded border-2 transition-all flex items-start gap-2.5 ${
                     isActive
@@ -550,26 +567,40 @@ export const Community = () => {
       </div>
 
       {/* 2. Main Chat Area */}
-      <div className="flex-1 flex flex-col bg-white overflow-hidden">
+      <div
+        className={`${
+          showMobileChannels ? 'hidden md:flex' : 'flex'
+        } flex-1 flex-col bg-white overflow-hidden`}
+      >
         {/* Channel Header Banner */}
-        <div className="p-3 sm:p-4 border-b-[3px] border-ink bg-white flex items-center justify-between shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-md bg-cream border-2 border-ink flex items-center justify-center shadow-[2px_2px_0px_#171510]">
+        <div className="p-2.5 sm:p-4 border-b-[3px] border-ink bg-white flex items-center justify-between shadow-sm">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            {/* Mobile Back / Toggle Channels Button */}
+            <button
+              onClick={() => setShowMobileChannels(true)}
+              className="md:hidden p-1.5 rounded-md bg-comic-yellow border-2 border-ink shadow-[2px_2px_0px_#171510] flex items-center gap-1 text-ink active:scale-95 flex-shrink-0"
+              title="Switch Channel"
+            >
+              <ChevronLeft className="w-4 h-4 stroke-[3]" />
+              <span className="font-comic text-[10px] uppercase font-bold">CHANNELS</span>
+            </button>
+
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-md bg-cream border-2 border-ink flex items-center justify-center shadow-[2px_2px_0px_#171510] flex-shrink-0">
               {getChannelIcon(activeChannel?.name)}
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="font-heading text-lg sm:text-xl uppercase tracking-wide text-ink">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <h2 className="font-heading text-base sm:text-xl uppercase tracking-wide text-ink truncate">
                   #{activeChannel?.name || 'COMMUNITY ARENA'}
                 </h2>
                 {isAnnouncements && (
-                  <span className="font-comic text-[10px] bg-punch-red text-cream px-2 py-0.5 rounded border border-ink shadow-[1px_1px_0px_#171510]">
+                  <span className="font-comic text-[9px] sm:text-[10px] bg-punch-red text-cream px-1.5 py-0.5 rounded border border-ink shadow-[1px_1px_0px_#171510]">
                     OFFICIAL BROADCASTS ONLY
                   </span>
                 )}
                 {isNotesAndResources && (
-                  <span className="font-comic text-[10px] bg-victory-green text-cream px-2 py-0.5 rounded border border-ink shadow-[1px_1px_0px_#171510]">
-                    AUTHORIZED RESOURCE VAULT
+                  <span className="font-comic text-[9px] sm:text-[10px] bg-victory-green text-cream px-1.5 py-0.5 rounded border border-ink shadow-[1px_1px_0px_#171510]">
+                    AUTHORIZED VAULT
                   </span>
                 )}
               </div>
