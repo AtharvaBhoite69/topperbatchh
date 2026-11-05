@@ -100,6 +100,28 @@ app.get(['/api/health', '/health'], (req, res) => {
   });
 });
 
+// Database health check endpoint
+app.get(['/api/health/db', '/health/db'], async (req, res) => {
+  try {
+    const { getDb } = require('./database/db');
+    const db = getDb();
+    const result = await db.prepare('SELECT COUNT(*) as count FROM users').get();
+    res.status(200).json({
+      status: 'database_connected',
+      isPostgres: db.isPostgres,
+      userCount: result?.count || 0,
+      hasDatabaseUrl: !!process.env.DATABASE_URL,
+    });
+  } catch (err) {
+    res.status(500).json({
+      status: 'database_error',
+      message: err.message,
+      hasDatabaseUrl: !!process.env.DATABASE_URL,
+      hint: !process.env.DATABASE_URL ? 'DATABASE_URL is missing in Vercel Environment Variables.' : undefined,
+    });
+  }
+});
+
 // Socket.io Realtime Community Connection Handlers
 const onlineUsers = new Map();
 

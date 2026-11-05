@@ -46,6 +46,21 @@ function convertSqlToPostgres(sql) {
 }
 
 /**
+ * Safely sanitize PostgreSQL connection string (auto-encodes passwords with '@' characters)
+ */
+function sanitizeDatabaseUrl(url) {
+  if (!url) return url;
+  try {
+    const match = url.trim().match(/^(postgres(?:ql)?:\/\/)([^:]+):(.*)@([^@]+)$/);
+    if (match) {
+      const [, prefix, user, pass, hostAndRest] = match;
+      return `${prefix}${encodeURIComponent(decodeURIComponent(user))}:${encodeURIComponent(decodeURIComponent(pass))}@${hostAndRest}`;
+    }
+  } catch (_) {}
+  return url.trim();
+}
+
+/**
  * Initialize and get database instance.
  */
 function getDb() {
@@ -53,7 +68,7 @@ function getDb() {
     return dbInstance;
   }
 
-  const databaseUrl = process.env.DATABASE_URL;
+  const databaseUrl = sanitizeDatabaseUrl(process.env.DATABASE_URL);
 
   // ---------------------------------------------------------------------------
   // 1. PRODUCTION MODE: Supabase PostgreSQL
@@ -65,7 +80,7 @@ function getDb() {
     pgPool = new Pool({
       connectionString: databaseUrl,
       ssl: { rejectUnauthorized: false }, // Necessary for Supabase SSL pooler
-      max: 20,
+      max: process.env.VERCEL ? 3 : 20,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 10000,
     });

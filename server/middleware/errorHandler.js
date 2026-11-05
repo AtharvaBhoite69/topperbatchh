@@ -47,31 +47,31 @@ function errorHandler(err, req, res, _next) {
     });
   }
 
-  // SQLite constraint errors
-  if (err.message && err.message.includes('UNIQUE constraint failed')) {
+  // SQLite & Postgres constraint errors
+  if (err.message && (err.message.includes('UNIQUE constraint failed') || err.code === '23505')) {
     return res.status(409).json({
       error: 'A record with this information already exists.',
+      details: err.message,
     });
   }
 
-  if (err.message && err.message.includes('FOREIGN KEY constraint failed')) {
+  if (err.message && (err.message.includes('FOREIGN KEY constraint failed') || err.code === '23503')) {
     return res.status(400).json({
       error: 'Referenced record does not exist.',
+      details: err.message,
     });
   }
 
   // Default error response
   const statusCode = err.statusCode || err.status || 500;
   const response = {
-    error: statusCode === 500
-      ? 'An internal server error occurred.'
-      : err.message || 'Something went wrong.',
+    error: err.message || (statusCode === 500 ? 'An internal server error occurred.' : 'Something went wrong.'),
+    details: err.message,
   };
 
   // Include stack trace in development
   if (env.NODE_ENV === 'development') {
     response.stack = err.stack;
-    response.details = err.message;
   }
 
   res.status(statusCode).json(response);

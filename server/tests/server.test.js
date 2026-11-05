@@ -15,19 +15,24 @@ test('Environment and Permanent Admins configured', () => {
   assert.strictEqual(env.ADMIN_EMAILS.length, 2);
 });
 
-test('Database migrations create all required tables', () => {
+test('Database migrations create all required tables', async () => {
   const { getDb } = require('../database/db');
   const { runMigrations } = require('../database/migrate');
   const { seedDatabase } = require('../database/seed');
 
-  runMigrations();
-  seedDatabase();
+  if (!process.env.DATABASE_URL) {
+    runMigrations();
+    seedDatabase();
+  }
 
   const db = getDb();
-  const tables = db
-    .prepare("SELECT name FROM sqlite_master WHERE type='table'")
-    .all()
-    .map((t) => t.name);
+  let tableRows = [];
+  if (db.isPostgres) {
+    tableRows = await db.prepare("SELECT table_name as name FROM information_schema.tables WHERE table_schema = 'public'").all();
+  } else {
+    tableRows = await db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
+  }
+  const tables = (tableRows || []).map((t) => t.name);
 
   const expectedTables = [
     'users',
@@ -102,4 +107,7 @@ test('Password hashing and token helpers work correctly', async () => {
   const sanitized = sanitizeUser(user);
   assert.strictEqual(sanitized.password_hash, undefined);
   assert.strictEqual(sanitized.email, 'test@college.edu');
+
+  const { closeDb } = require('../database/db');
+  await closeDb();
 });
