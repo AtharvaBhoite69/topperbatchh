@@ -2,9 +2,14 @@
 // TopperBatch - Migrate Local PDFs and Attachments to Supabase Storage
 // =============================================================================
 
-require('dotenv').config();
-const fs = require('fs');
 const path = require('path');
+const fs = require('fs');
+
+try {
+  require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+} catch (_) {
+  require(path.join(__dirname, '..', 'server', 'node_modules', 'dotenv')).config({ path: path.join(__dirname, '..', '.env') });
+}
 const {
   getSupabaseAdmin,
   ensureBuckets,

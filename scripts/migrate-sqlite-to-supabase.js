@@ -3,11 +3,25 @@
 // Copies all records, preserves IDs, password hashes, and relations.
 // =============================================================================
 
-require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const path = require('path');
 const fs = require('fs');
+
+// Load dotenv from server or root
+try {
+  require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+} catch (_) {
+  require(path.join(__dirname, '..', 'server', 'node_modules', 'dotenv')).config({ path: path.join(__dirname, '..', '.env') });
+}
+
+// Load pg from server
+let Pool;
+try {
+  Pool = require('pg').Pool;
+} catch (_) {
+  Pool = require(path.join(__dirname, '..', 'server', 'node_modules', 'pg')).Pool;
+}
+
 const { DatabaseSync } = require('node:sqlite');
-const { Pool } = require('pg');
 
 async function migrate() {
   console.log('🚀 Starting SQLite -> Supabase PostgreSQL Data Migration...\n');
