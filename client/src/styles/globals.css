@@ -35,3 +35,11 @@ body {
   outline: 3px solid #F5B900;
   outline-offset: 2px;
 }
+
+/* Anti-Print & Anti-PDF Export Shield */
+@media print {
+  html, body {
+    display: none !important;
+    visibility: hidden !important;
+  }
+}

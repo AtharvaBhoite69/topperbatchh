@@ -10,6 +10,7 @@ import ComicButton from '../ui/ComicButton';
  */
 export const ScreenshotProtector = ({ children }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [isWindowFocused, setIsWindowFocused] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [countdown, setCountdown] = useState(7);
   const timerRef = useRef(null);
@@ -150,7 +151,18 @@ export const ScreenshotProtector = ({ children }) => {
       activePointers.delete(e.pointerId);
     };
 
-    // 2. Desktop Keyboard Handlers (PrintScreen, Snipping tool, macOS, Ctrl+P)
+    // 2. Window Focus & Blur Monitor (Instant Anti-Capture Protection)
+    // When external tools (Windows Snipping Tool, Mac Screen Selection, Lightshot, ShareX) activate,
+    // they steal OS focus. We instantly blur the study content so captured snips are unreadable.
+    const handleWindowBlur = () => {
+      setIsWindowFocused(false);
+    };
+
+    const handleWindowFocus = () => {
+      setIsWindowFocused(true);
+    };
+
+    // 3. Desktop Keyboard Handlers (PrintScreen, Edge Web Capture, DevTools, Ctrl+P)
     const handleKeyDown = (e) => {
       recordInteraction();
 
@@ -162,17 +174,19 @@ export const ScreenshotProtector = ({ children }) => {
         e.which === 44
       ) {
         e.preventDefault();
+        e.stopImmediatePropagation();
         triggerEasterEgg();
         return false;
       }
 
-      // Windows Snipping tool shortcut (Ctrl+Shift+S / Win+Shift+S / Shift+PrtScn)
+      // Windows / Edge Snipping tool shortcut (Ctrl+Shift+S / Win+Shift+S / Shift+PrtScn)
       if (
         (e.ctrlKey || e.metaKey) &&
         e.shiftKey &&
         (e.key === 's' || e.key === 'S' || e.code === 'KeyS')
       ) {
         e.preventDefault();
+        e.stopImmediatePropagation();
         triggerEasterEgg();
         return false;
       }
@@ -184,6 +198,19 @@ export const ScreenshotProtector = ({ children }) => {
         ['3', '4', '5', '$', '%', '#'].includes(e.key)
       ) {
         e.preventDefault();
+        e.stopImmediatePropagation();
+        triggerEasterEgg();
+        return false;
+      }
+
+      // DevTools & Inspector Shortcuts (used to take headless screenshots in Edge/Brave/Chrome)
+      if (
+        e.key === 'F12' ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && ['I', 'i', 'J', 'j', 'C', 'c'].includes(e.key)) ||
+        ((e.ctrlKey || e.metaKey) && (e.key === 'u' || e.key === 'U'))
+      ) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
         triggerEasterEgg();
         return false;
       }
@@ -194,6 +221,7 @@ export const ScreenshotProtector = ({ children }) => {
         (e.key === 'p' || e.key === 'P' || e.code === 'KeyP' || e.keyCode === 80)
       ) {
         e.preventDefault();
+        e.stopImmediatePropagation();
         triggerEasterEgg();
         return false;
       }
@@ -211,14 +239,26 @@ export const ScreenshotProtector = ({ children }) => {
       }
     };
 
+    // Block Edge / Brave Right-Click Menu (Prevents selecting "Web capture" or "Take screenshot")
+    const handleContextMenu = (e) => {
+      const isInput = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
+      if (!isInput) {
+        e.preventDefault();
+        triggerEasterEgg();
+      }
+    };
+
     // Browser Print Event (catches browser-menu "Print" / "Save as PDF")
     const handleBeforePrint = () => {
       triggerEasterEgg();
     };
 
     // Attach high-priority capture-phase listeners for zero-delay response
+    window.addEventListener('blur', handleWindowBlur);
+    window.addEventListener('focus', handleWindowFocus);
     window.addEventListener('keydown', handleKeyDown, true);
     window.addEventListener('keyup', handleKeyUp, true);
+    window.addEventListener('contextmenu', handleContextMenu, true);
     window.addEventListener('beforeprint', handleBeforePrint);
 
     window.addEventListener('touchstart', handleTouch, { capture: true, passive: true });
@@ -234,8 +274,11 @@ export const ScreenshotProtector = ({ children }) => {
       window.removeEventListener('keydown', recordInteraction);
       window.removeEventListener('touchstart', recordInteraction);
 
+      window.removeEventListener('blur', handleWindowBlur);
+      window.removeEventListener('focus', handleWindowFocus);
       window.removeEventListener('keydown', handleKeyDown, true);
       window.removeEventListener('keyup', handleKeyUp, true);
+      window.removeEventListener('contextmenu', handleContextMenu, true);
       window.removeEventListener('beforeprint', handleBeforePrint);
 
       window.removeEventListener('touchstart', handleTouch, true);
@@ -253,8 +296,31 @@ export const ScreenshotProtector = ({ children }) => {
 
   return (
     <>
-      {/* Normal Website Application Hierarchy */}
-      {children}
+      {/* Normal Website Application Hierarchy with Auto-Protection on Focus Loss */}
+      <div
+        className={`transition-all duration-150 ${
+          !isWindowFocused && !isOpen ? 'filter blur-md select-none pointer-events-none' : ''
+        }`}
+      >
+        {children}
+      </div>
+
+      {/* Screen Snipping Obfuscation Shield (covers content during external snips) */}
+      {!isWindowFocused && !isOpen && (
+        <div className="fixed inset-0 z-[99990] bg-ink/30 backdrop-blur-md flex items-center justify-center p-4 select-none pointer-events-none">
+          <div className="comic-box bg-cream border-[3px] border-ink p-4 shadow-[6px_6px_0px_#171510] text-center max-w-sm animate-pulse">
+            <span className="font-comic text-xs uppercase text-punch-red font-bold block mb-1">
+              🔒 TOPPERBATCH ANTI-CAPTURE SHIELD
+            </span>
+            <p className="font-heading text-lg uppercase text-ink">
+              STUDY CONTENT PROTECTED
+            </p>
+            <p className="font-sans text-xs text-olive-dark mt-1 font-medium">
+              Click anywhere inside this window to resume learning!
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Funny Screenshot-Attempt Popup Easter Egg */}
       {isOpen && (
