@@ -4,7 +4,7 @@ import ComicCard from '../../components/ui/ComicCard';
 import ComicInput from '../../components/ui/ComicInput';
 import { LoadingSkeleton, EmptyState } from '../../components/ui/ComicElements';
 import api from '../../services/api';
-import { Zap, Plus, Calendar, Clock, Trophy } from 'lucide-react';
+import { Zap, Plus, Calendar, Clock, Trophy, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const ManageChallenges = () => {
@@ -12,6 +12,7 @@ export const ManageChallenges = () => {
   const [questions, setQuestions] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState(null);
 
   // Modal / Form state
   const [showModal, setShowModal] = useState(false);
@@ -87,6 +88,27 @@ export const ManageChallenges = () => {
     }
   };
 
+  const handleDeleteChallenge = async (challenge) => {
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently delete "${challenge.title}"? This will also remove student attempts for this battle.`
+    );
+    if (!confirmed) return;
+
+    setDeletingId(challenge.id);
+    try {
+      const res = await api.delete(`/quiz/challenges/${challenge.id}`);
+      if (res.data?.success) {
+        setChallenges((prev) => prev.filter((item) => item.id !== challenge.id));
+        toast.success(res.data.message || 'MCQ battle deleted.');
+      }
+    } catch (err) {
+      const errMsg = err.response?.data?.error || err.response?.data?.details || 'Failed to delete MCQ battle.';
+      toast.error(errMsg);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <div className="max-w-5xl mx-auto space-y-6 text-left select-none">
       {/* Top Banner */}
@@ -151,6 +173,18 @@ export const ManageChallenges = () => {
                 <div className="text-xs font-mono text-olive-dark mt-0.5">
                   Duration: {c.duration_minutes}m • Questions: {c.question_count || 0} • Attempts: {c.attempt_count || 0}
                 </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-end md:self-center">
+                <button
+                  type="button"
+                  onClick={() => handleDeleteChallenge(c)}
+                  disabled={deletingId === c.id}
+                  className="comic-btn comic-btn-red text-xs px-3 py-1.5 flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{deletingId === c.id ? 'DELETING...' : 'DELETE'}</span>
+                </button>
               </div>
             </div>
           ))}

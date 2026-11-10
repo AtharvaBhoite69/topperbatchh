@@ -648,4 +648,41 @@ router.get('/challenges', requireAdmin, async (req, res, next) => {
   }
 });
 
+/**
+ * DELETE /api/quiz/challenges/:id (Admin)
+ * Permanently delete an MCQ battle and clean up its attempts cleanly.
+ */
+router.delete('/challenges/:id', requireAdmin, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const db = getDb();
+
+    const challenge = await db.prepare('SELECT id, title FROM mcq_challenges WHERE id = ?').get(id);
+    if (!challenge) {
+      return res.status(404).json({ error: 'MCQ battle not found.' });
+    }
+
+    // 1. Clean up student answers linked to attempts in this challenge
+    await db.prepare(
+      'DELETE FROM student_answers WHERE attempt_id IN (SELECT id FROM quiz_attempts WHERE challenge_id = ?)'
+    ).run(id);
+
+    // 2. Clean up quiz attempts for this challenge
+    await db.prepare('DELETE FROM quiz_attempts WHERE challenge_id = ?').run(id);
+
+    // 3. Unlink questions so reusable Question Bank items are preserved
+    await db.prepare('UPDATE questions SET challenge_id = NULL WHERE challenge_id = ?').run(id);
+
+    // 4. Delete the challenge itself
+    await db.prepare('DELETE FROM mcq_challenges WHERE id = ?').run(id);
+
+    return res.status(200).json({
+      success: true,
+      message: `Deleted MCQ battle "${challenge.title}".`,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
