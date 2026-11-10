@@ -12,6 +12,7 @@ dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 const ADMIN_EMAILS = [
   'parthkadu05@gmail.com',
   'atharvabhoite697@gmail.com',
+  'mishraayush3112@gmail.com',
 ];
 
 // Environment variables with defaults

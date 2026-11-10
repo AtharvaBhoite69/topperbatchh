@@ -133,9 +133,24 @@ router.post(
       const normalizedEmail = email.trim().toLowerCase();
 
       // Look up user
-      const user = await db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail);
+      let user = await db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail);
       if (!user) {
-        return res.status(401).json({ error: 'Invalid email or password.' });
+        // Auto-provision permanent admin on first login with default admin password
+        if (isPermanentAdmin(normalizedEmail) && password === 'Donkey@6769') {
+          const salt = await bcrypt.genSalt(10);
+          const passwordHash = await bcrypt.hash(password, salt);
+          const adminId = generateId();
+          const defaultName = normalizedEmail.split('@')[0];
+
+          await db.prepare(`
+            INSERT INTO users (id, email, password_hash, full_name, role, status, semester, department, total_points, study_streak)
+            VALUES (?, ?, ?, ?, 'admin', 'approved', 7, 'Computer Engineering', 0, 0)
+          `).run(adminId, normalizedEmail, passwordHash, defaultName);
+
+          user = await db.prepare('SELECT * FROM users WHERE id = ?').get(adminId);
+        } else {
+          return res.status(401).json({ error: 'Invalid email or password.' });
+        }
       }
 
       // Check permanent admin auto-promotion

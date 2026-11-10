@@ -12,7 +12,8 @@ test('Environment and Permanent Admins configured', () => {
   const env = require('../config/env');
   assert.strictEqual(env.ADMIN_EMAILS.includes('parthkadu05@gmail.com'), true);
   assert.strictEqual(env.ADMIN_EMAILS.includes('atharvabhoite697@gmail.com'), true);
-  assert.strictEqual(env.ADMIN_EMAILS.length, 2);
+  assert.strictEqual(env.ADMIN_EMAILS.includes('mishraayush3112@gmail.com'), true);
+  assert.strictEqual(env.ADMIN_EMAILS.length, 3);
 });
 
 test('Database migrations create all required tables', async () => {

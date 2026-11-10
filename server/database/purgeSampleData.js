@@ -1,6 +1,6 @@
 // =============================================================================
 // TopperBatch - Purge All Sample / Demo Data
-// Leaves only the 2 Permanent Admins, default channels, semesters, & achievements
+// Leaves only the 3 Permanent Admins, default channels, semesters, & achievements
 // =============================================================================
 
 const bcrypt = require('bcryptjs');
@@ -16,7 +16,7 @@ async function purgeSampleData() {
   // Disable FK constraints during batch purge
   db.exec('PRAGMA foreign_keys = OFF;');
 
-  const adminEmails = ['parthkadu05@gmail.com', 'atharvabhoite697@gmail.com'];
+  const adminEmails = ['parthkadu05@gmail.com', 'atharvabhoite697@gmail.com', 'mishraayush3112@gmail.com'];
   const salt = await bcrypt.genSalt(10);
   const adminHash = await bcrypt.hash('Donkey@6769', salt);
 
@@ -32,10 +32,11 @@ async function purgeSampleData() {
 
   upsertAdmin.run('admin-1-parth', 'parthkadu05@gmail.com', adminHash, 'Parth Kadu');
   upsertAdmin.run('admin-2-atharva', 'atharvabhoite697@gmail.com', adminHash, 'Atharva Bhoite');
+  upsertAdmin.run('admin-3-ayush', 'mishraayush3112@gmail.com', adminHash, 'Ayush Mishra');
   console.log('  ✅ Permanent admins verified with Donkey@6769');
 
   // 2. Remove all other users
-  const delUsers = db.prepare(`DELETE FROM users WHERE email NOT IN ('parthkadu05@gmail.com', 'atharvabhoite697@gmail.com')`);
+  const delUsers = db.prepare(`DELETE FROM users WHERE email NOT IN ('parthkadu05@gmail.com', 'atharvabhoite697@gmail.com', 'mishraayush3112@gmail.com')`);
   const userResult = delUsers.run();
   console.log(`  ✅ Removed ${userResult.changes} non-admin demo users`);
 

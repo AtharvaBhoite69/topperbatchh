@@ -33,6 +33,7 @@ function seedDatabase() {
 
   insertAdmin.run('admin-1-parth', 'parthkadu05@gmail.com', adminHash, 'Parth Kadu');
   insertAdmin.run('admin-2-atharva', 'atharvabhoite697@gmail.com', adminHash, 'Atharva Bhoite');
+  insertAdmin.run('admin-3-ayush', 'mishraayush3112@gmail.com', adminHash, 'Ayush Mishra');
   console.log('  ✅ Permanent admins verified');
 
   // =========================================================================
