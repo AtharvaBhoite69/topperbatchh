@@ -101,8 +101,10 @@ async function getTransporter() {
 
   transporter = nodemailer.createTransport({
     pool: true,
-    maxConnections: 5,
+    maxConnections: 2,
     maxMessages: 100,
+    rateDelta: 1000,
+    rateLimit: 6,
     host: cfg.host,
     port: cfg.port,
     secure: cfg.port === 465,
@@ -150,93 +152,90 @@ async function sendEmail(to, subject, html, text) {
 }
 
 /**
- * Send a formatted update email to multiple registered users.
- * Sends individual To: emails via pooled connections for small/medium batches (best inbox delivery),
- * and switches to BCC chunks for very large batches to stay under serverless timeouts.
+ * Send a personalized, spam-safe update email to multiple registered users.
+ * Avoids BCC blasts and promotional link boxes that trigger Gmail's automated spam filter.
  */
-async function sendBatchUpdateEmail({ recipients = [], subject, title, message, ctaUrl }) {
-  const cleanEmails = Array.from(
-    new Set(
-      recipients
-        .map((e) => (typeof e === 'string' ? e.trim().toLowerCase() : ''))
-        .filter((e) => e && e.includes('@'))
-    )
-  );
+async function sendBatchUpdateEmail({ recipients = [], subject, title, message }) {
+  const uniqueMap = new Map();
+  for (const item of recipients) {
+    const rawEmail = typeof item === 'string' ? item : item?.email;
+    const rawName = typeof item === 'string' ? '' : item?.name || '';
+    const email = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : '';
+    if (email && email.includes('@') && !uniqueMap.has(email)) {
+      uniqueMap.set(email, rawName.trim());
+    }
+  }
 
-  if (cleanEmails.length === 0) {
+  const recipientList = Array.from(uniqueMap.entries()).map(([email, name]) => ({
+    email,
+    firstName: name ? name.split(/\s+/)[0] : 'Student',
+  }));
+
+  if (recipientList.length === 0) {
     return { totalRecipients: 0, sentCount: 0, skipped: true, error: 'No matching recipients found.' };
   }
 
   const { transport, cfg } = await getTransporter();
   if (!transport) {
     return {
-      totalRecipients: cleanEmails.length,
+      totalRecipients: recipientList.length,
       sentCount: 0,
       skipped: true,
-      error: 'SMTP is not configured. Save your Gmail/SMTP credentials in Admin → Control Room.',
+      error: 'SMTP is not configured. Save your SMTP credentials in Admin → Control Room.',
     };
   }
 
-  const targetLink = ctaUrl || `${env.CLIENT_URL}/dashboard`;
   const safeTitle = escapeHtml(title || subject);
   const safeBody = escapeHtml(message).replace(/\n/g, '<br/>');
 
-  const html = `
-    <div style="font-family: Inter, Arial, sans-serif; max-width: 620px; margin: 0 auto; background: #F5E9D1; border: 3px solid #171510; padding: 24px; color: #171510;">
-      <div style="background: #F5B900; border: 2px solid #171510; padding: 12px 16px; margin-bottom: 18px;">
-        <h1 style="margin: 0; font-size: 20px; letter-spacing: 1px; text-transform: uppercase;">TOPPERBATCH UPDATE</h1>
-        <p style="margin: 4px 0 0; font-size: 11px; font-weight: bold;">ISS SEM, 9 POINTER FIX!</p>
+  const buildContent = (firstName) => {
+    const safeName = escapeHtml(firstName);
+    const html = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 16px; color: #222222; line-height: 1.6; font-size: 14px;">
+        <p style="margin: 0 0 12px;">Hi ${safeName},</p>
+        <p style="margin: 0 0 8px; font-weight: 600; color: #111111;">${safeTitle}</p>
+        <div style="margin: 0 0 16px;">${safeBody}</div>
+        <p style="margin: 18px 0 0; color: #444444;">Regards,<br/>TopperBatch Team</p>
       </div>
-      <div style="background: #FFFFFF; border: 2px solid #171510; padding: 18px;">
-        <h2 style="margin: 0 0 12px; font-size: 18px; color: #171510;">${safeTitle}</h2>
-        <div style="font-size: 14px; line-height: 1.6; color: #2b2923;">${safeBody}</div>
-        <div style="margin-top: 20px;">
-          <a href="${targetLink}" style="display: inline-block; padding: 10px 18px; background: #F5B900; color: #171510; font-weight: bold; text-decoration: none; border: 2px solid #171510;">
-            Open TopperBatch
-          </a>
-        </div>
-      </div>
-      <p style="margin: 14px 0 0; font-size: 11px; color: #555;">
-        You received this update because you registered on TopperBatch with this email address.
-      </p>
-    </div>
-  `;
-
-  const plainText = `${title || subject}\n\n${message}\n\nOpen TopperBatch: ${targetLink}\n\n---\nYou received this update because you registered on TopperBatch with this email address.`;
+    `;
+    const text = `Hi ${firstName},\n\n${title || subject}\n\n${message}\n\nRegards,\nTopperBatch Team`;
+    return { html, text };
+  };
 
   let sentCount = 0;
   let lastError = null;
 
-  if (cleanEmails.length <= 35) {
-    // Direct To: delivery in batches of 5 over pooled connection avoids BCC spam filtering
-    const CONCURRENCY = 5;
-    for (let i = 0; i < cleanEmails.length; i += CONCURRENCY) {
-      const batch = cleanEmails.slice(i, i + CONCURRENCY);
+  if (recipientList.length <= 100) {
+    // Individual personalized To: emails in controlled batches of 3
+    const CONCURRENCY = 3;
+    for (let i = 0; i < recipientList.length; i += CONCURRENCY) {
+      const batch = recipientList.slice(i, i + CONCURRENCY);
       await Promise.all(
-        batch.map(async (recipientEmail) => {
+        batch.map(async ({ email, firstName }) => {
+          const { html, text } = buildContent(firstName);
           try {
             await transport.sendMail({
               from: `"TopperBatch" <${cfg.from}>`,
               replyTo: cfg.from,
-              to: recipientEmail,
+              to: email,
               subject,
-              text: plainText,
+              text,
               html,
             });
             sentCount += 1;
           } catch (err) {
             lastError = err.message;
-            console.error(`Direct email error (${recipientEmail}):`, err.message);
+            console.error(`Direct email error (${email}):`, err.message);
           }
         })
       );
     }
   } else {
-    // Large list: BCC chunks to stay safely within serverless execution timeout
     const CHUNK_SIZE = 35;
+    const { html, text } = buildContent('Student');
     const chunks = [];
-    for (let i = 0; i < cleanEmails.length; i += CHUNK_SIZE) {
-      chunks.push(cleanEmails.slice(i, i + CHUNK_SIZE));
+    for (let i = 0; i < recipientList.length; i += CHUNK_SIZE) {
+      chunks.push(recipientList.slice(i, i + CHUNK_SIZE).map((r) => r.email));
     }
 
     await Promise.all(
@@ -248,7 +247,7 @@ async function sendBatchUpdateEmail({ recipients = [], subject, title, message, 
             to: cfg.from,
             bcc: bccList,
             subject,
-            text: plainText,
+            text,
             html,
           });
           sentCount += bccList.length;
@@ -261,7 +260,7 @@ async function sendBatchUpdateEmail({ recipients = [], subject, title, message, 
   }
 
   return {
-    totalRecipients: cleanEmails.length,
+    totalRecipients: recipientList.length,
     sentCount,
     skipped: false,
     error: sentCount === 0 ? lastError : null,

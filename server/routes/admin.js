@@ -521,7 +521,7 @@ router.post('/announcements', async (req, res, next) => {
     `).run(announcementId, title.trim(), content.trim(), priority, req.user.id, expiresAt || null);
 
     // Notify all approved students in-app
-    const students = await db.prepare("SELECT id, email FROM users WHERE status = 'approved'").all();
+    const students = await db.prepare("SELECT id, email, full_name FROM users WHERE status = 'approved'").all();
     const notifyStmt = db.prepare(`
       INSERT INTO notifications (id, user_id, type, title, message, link)
       VALUES (?, ?, 'announcement', ?, ?, '/dashboard')
@@ -535,15 +535,13 @@ router.post('/announcements', async (req, res, next) => {
     if (shouldEmail) {
       let recipientRows = students;
       if (audience === 'all') {
-        recipientRows = await db.prepare("SELECT email FROM users WHERE status IN ('approved', 'pending')").all();
+        recipientRows = await db.prepare("SELECT email, full_name FROM users WHERE status IN ('approved', 'pending')").all();
       }
-      const origin = req.get('origin') || `${req.protocol}://${req.get('host')}`;
       emailResult = await sendBatchUpdateEmail({
-        recipients: recipientRows.map((r) => r.email),
-        subject: `[TopperBatch] ${title.trim()}`,
+        recipients: recipientRows.map((r) => ({ email: r.email, name: r.full_name })),
+        subject: title.trim(),
         title: title.trim(),
         message: content.trim(),
-        ctaUrl: `${origin}/dashboard`,
       });
     }
 
@@ -583,21 +581,19 @@ router.post('/email-broadcast', async (req, res, next) => {
     }
 
     const db = getDb();
-    let query = "SELECT email FROM users WHERE status = 'approved'";
+    let query = "SELECT email, full_name FROM users WHERE status = 'approved'";
     if (audience === 'all') {
-      query = "SELECT email FROM users WHERE status IN ('approved', 'pending')";
+      query = "SELECT email, full_name FROM users WHERE status IN ('approved', 'pending')";
     } else if (audience === 'pending') {
-      query = "SELECT email FROM users WHERE status = 'pending'";
+      query = "SELECT email, full_name FROM users WHERE status = 'pending'";
     }
 
-    const origin = req.get('origin') || `${req.protocol}://${req.get('host')}`;
     const rows = await db.prepare(query).all();
     const result = await sendBatchUpdateEmail({
-      recipients: rows.map((r) => r.email),
+      recipients: rows.map((r) => ({ email: r.email, name: r.full_name })),
       subject: subject.trim(),
       title: (title || subject).trim(),
       message: message.trim(),
-      ctaUrl: `${origin}/dashboard`,
     });
 
     await logAudit(
