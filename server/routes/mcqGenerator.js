@@ -14,6 +14,7 @@ const { getDb } = require('../database/db');
 const { generateId } = require('../utils/helpers');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const { generateMCQsFromPDF, regenerateSingleQuestion } = require('../services/mcqGenerator');
+const { downloadFromStorage, BUCKET_DOCUMENTS } = require('../services/supabaseStorage');
 
 // STRICT ADMIN ENFORCEMENT: All routes require active Admin credentials
 router.use(authenticate, requireAdmin);
@@ -25,6 +26,57 @@ try {
     fs.mkdirSync(uploadDir, { recursive: true });
   }
 } catch (_) {}
+
+/**
+ * Resolve a Vault document's text/file for MCQ generation across Vercel cold starts:
+ * 1) Prefer pre-extracted pages stored in PostgreSQL `document_pages`.
+ * 2) Otherwise read local temp file or download from Supabase Private Storage.
+ */
+async function resolveVaultDocumentSource(db, docId) {
+  const doc = await db.prepare('SELECT * FROM documents WHERE id = ?').get(docId);
+  if (!doc) {
+    return { notFound: true };
+  }
+
+  const originalName = doc.original_name || doc.title;
+
+  // 1. Fast path: pre-extracted pages already in DB
+  try {
+    const pageRows = await db
+      .prepare('SELECT page_number, content FROM document_pages WHERE document_id = ? ORDER BY page_number ASC')
+      .all(docId);
+    if (Array.isArray(pageRows) && pageRows.length > 0) {
+      return {
+        originalName,
+        preExtractedPages: pageRows.map((p) => ({
+          pageNumber: p.page_number,
+          content: p.content || '',
+        })),
+        filePath: null,
+      };
+    }
+  } catch (_) {}
+
+  // 2. Check local disk / /tmp cache
+  const localPath = path.join(uploadDir, doc.filename);
+  if (fs.existsSync(localPath)) {
+    return { originalName, preExtractedPages: null, filePath: localPath };
+  }
+
+  // 3. Download from Supabase Storage into /tmp/uploads
+  if (doc.filename) {
+    const fileBuffer = await downloadFromStorage(BUCKET_DOCUMENTS, doc.filename);
+    if (fileBuffer && fileBuffer.length > 0) {
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      fs.writeFileSync(localPath, fileBuffer);
+      return { originalName, preExtractedPages: null, filePath: localPath };
+    }
+  }
+
+  return { missingFile: true, originalName };
+}
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
@@ -63,6 +115,7 @@ router.post('/generate', upload.single('file'), async (req, res, next) => {
 
     const db = getDb();
     let filePath = null;
+    let preExtractedPages = null;
     let originalName = 'Uploaded Material.pdf';
     let docId = document_id || null;
 
@@ -70,15 +123,16 @@ router.post('/generate', upload.single('file'), async (req, res, next) => {
       filePath = req.file.path;
       originalName = req.file.originalname;
     } else if (document_id) {
-      const doc = await db.prepare('SELECT * FROM documents WHERE id = ?').get(document_id);
-      if (!doc) {
+      const resolved = await resolveVaultDocumentSource(db, document_id);
+      if (resolved.notFound) {
         return res.status(404).json({ error: 'Vault document not found.' });
       }
-      originalName = doc.original_name || doc.title;
-      filePath = path.join(uploadDir, doc.filename);
-      if (!fs.existsSync(filePath)) {
+      if (resolved.missingFile) {
         return res.status(404).json({ error: 'Document PDF file is missing on storage.' });
       }
+      originalName = resolved.originalName;
+      filePath = resolved.filePath;
+      preExtractedPages = resolved.preExtractedPages;
     } else {
       return res.status(400).json({ error: 'Please upload a PDF file or select an existing document from the vault.' });
     }
@@ -88,6 +142,7 @@ router.post('/generate', upload.single('file'), async (req, res, next) => {
     // Generate MCQs via Gemini Service
     const result = await generateMCQsFromPDF({
       filePath,
+      preExtractedPages,
       originalName,
       count: questionCount,
       difficulty,
@@ -154,41 +209,43 @@ router.post('/regenerate-question', async (req, res, next) => {
 
     const db = getDb();
     let filePath = null;
+    let preExtractedPages = null;
     let originalName = source_pdf_name || 'Document.pdf';
 
-    if (document_id) {
-      const doc = await db.prepare('SELECT * FROM documents WHERE id = ?').get(document_id);
-      if (doc) {
-        filePath = path.join(uploadDir, doc.filename);
-        originalName = doc.original_name || doc.title;
+    let targetDocId = document_id || null;
+    if (!targetDocId && sessionId) {
+      const session = await db.prepare('SELECT document_id FROM mcq_draft_sessions WHERE id = ?').get(sessionId);
+      if (session?.document_id) {
+        targetDocId = session.document_id;
       }
     }
 
-    if (!filePath && sessionId) {
-      const session = await db.prepare('SELECT * FROM mcq_draft_sessions WHERE id = ?').get(sessionId);
-      if (session && session.document_id) {
-        const doc = await db.prepare('SELECT * FROM documents WHERE id = ?').get(session.document_id);
-        if (doc) {
-          filePath = path.join(uploadDir, doc.filename);
-          originalName = doc.original_name || doc.title;
+    if (targetDocId) {
+      const resolved = await resolveVaultDocumentSource(db, targetDocId);
+      if (!resolved.notFound && !resolved.missingFile) {
+        originalName = resolved.originalName;
+        filePath = resolved.filePath;
+        preExtractedPages = resolved.preExtractedPages;
+      }
+    }
+
+    // If still no direct path or DB pages, check most recent local uploads
+    if (!preExtractedPages && (!filePath || !fs.existsSync(filePath))) {
+      try {
+        const files = fs.readdirSync(uploadDir).filter((f) => f.endsWith('.pdf'));
+        if (files.length > 0) {
+          filePath = path.join(uploadDir, files[files.length - 1]);
         }
-      }
+      } catch (_) {}
     }
 
-    // If still no direct path, check most recent uploads
-    if (!filePath || !fs.existsSync(filePath)) {
-      const files = fs.readdirSync(uploadDir).filter((f) => f.endsWith('.pdf'));
-      if (files.length > 0) {
-        filePath = path.join(uploadDir, files[files.length - 1]);
-      }
-    }
-
-    if (!filePath || !fs.existsSync(filePath)) {
+    if (!preExtractedPages && (!filePath || !fs.existsSync(filePath))) {
       return res.status(400).json({ error: 'Original PDF file could not be located to regenerate.' });
     }
 
     const newQuestion = await regenerateSingleQuestion({
       pdfFilePath: filePath,
+      preExtractedPages,
       originalName,
       pageNumber: parseInt(page_number, 10) || 1,
       topic,

@@ -66,6 +66,7 @@ function cleanAndParseJSON(rawText) {
  */
 async function generateMCQsFromPDF({
   filePath,
+  preExtractedPages = null,
   originalName,
   count = 10,
   difficulty = 'mixed',
@@ -78,8 +79,15 @@ async function generateMCQsFromPDF({
     throw new Error('Gemini API is not configured. GEMINI_API_KEY missing from environment.');
   }
 
-  // 1. Extract per-page text from PDF
-  const extraction = await extractText(filePath);
+  // 1. Use pre-extracted DB pages if available, otherwise parse PDF file
+  const extraction =
+    Array.isArray(preExtractedPages) && preExtractedPages.length > 0
+      ? {
+          pages: preExtractedPages,
+          pageCount: preExtractedPages.length,
+          text: preExtractedPages.map((p) => p.content || '').join('\n'),
+        }
+      : await extractText(filePath);
   const totalPages = extraction.pageCount || extraction.pages.length || 1;
 
   if (!extraction.pages || extraction.pages.length === 0 || !extraction.text.trim()) {
@@ -248,6 +256,7 @@ ${combinedContext}`;
  */
 async function regenerateSingleQuestion({
   pdfFilePath,
+  preExtractedPages = null,
   originalName,
   pageNumber = 1,
   topic = '',
@@ -261,8 +270,14 @@ async function regenerateSingleQuestion({
     throw new Error('Gemini API is not configured.');
   }
 
-  // Get specific page text
-  const extraction = await extractText(pdfFilePath);
+  // Get specific page text from pre-extracted DB pages or PDF file
+  const extraction =
+    Array.isArray(preExtractedPages) && preExtractedPages.length > 0
+      ? {
+          pages: preExtractedPages,
+          text: preExtractedPages.map((p) => p.content || '').join('\n'),
+        }
+      : await extractText(pdfFilePath);
   const targetPage = extraction.pages.find((p) => p.pageNumber === parseInt(pageNumber, 10)) || extraction.pages[0];
   const pageText = targetPage ? targetPage.content : extraction.text.slice(0, 4000);
 
