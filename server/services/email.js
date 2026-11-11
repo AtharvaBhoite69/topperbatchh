@@ -185,21 +185,16 @@ async function sendBatchUpdateEmail({ recipients = [], subject, title, message }
     };
   }
 
-  const safeTitle = escapeHtml(title || subject);
-  const safeBody = escapeHtml(message).replace(/\n/g, '<br/>');
-
   const buildContent = (firstName) => {
-    const safeName = escapeHtml(firstName);
-    const html = `
-      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 16px; color: #222222; line-height: 1.6; font-size: 14px;">
-        <p style="margin: 0 0 12px;">Hi ${safeName},</p>
-        <p style="margin: 0 0 8px; font-weight: 600; color: #111111;">${safeTitle}</p>
-        <div style="margin: 0 0 16px;">${safeBody}</div>
-        <p style="margin: 18px 0 0; color: #444444;">Regards,<br/>TopperBatch Team</p>
-      </div>
-    `;
-    const text = `Hi ${firstName},\n\n${title || subject}\n\n${message}\n\nRegards,\nTopperBatch Team`;
-    return { html, text };
+    const headerLine = title && title.trim() !== subject.trim() ? `${title.trim()}\n\n` : '';
+    const text = `Hi ${firstName},\n\n${headerLine}${message}\n\nRegards,\nTopperBatch Team`;
+    return { text };
+  };
+
+  // Disable Brevo open/click tracking headers so Gmail doesn't classify updates as Promotions
+  const antiPromoHeaders = {
+    'X-Mailin-Track': '0',
+    'X-Mailin-Track-Links': '0',
   };
 
   let sentCount = 0;
@@ -212,7 +207,7 @@ async function sendBatchUpdateEmail({ recipients = [], subject, title, message }
       const batch = recipientList.slice(i, i + CONCURRENCY);
       await Promise.all(
         batch.map(async ({ email, firstName }) => {
-          const { html, text } = buildContent(firstName);
+          const { text } = buildContent(firstName);
           try {
             await transport.sendMail({
               from: `"TopperBatch" <${cfg.from}>`,
@@ -220,7 +215,7 @@ async function sendBatchUpdateEmail({ recipients = [], subject, title, message }
               to: email,
               subject,
               text,
-              html,
+              headers: antiPromoHeaders,
             });
             sentCount += 1;
           } catch (err) {
@@ -232,7 +227,7 @@ async function sendBatchUpdateEmail({ recipients = [], subject, title, message }
     }
   } else {
     const CHUNK_SIZE = 35;
-    const { html, text } = buildContent('Student');
+    const { text } = buildContent('Student');
     const chunks = [];
     for (let i = 0; i < recipientList.length; i += CHUNK_SIZE) {
       chunks.push(recipientList.slice(i, i + CHUNK_SIZE).map((r) => r.email));
@@ -248,7 +243,7 @@ async function sendBatchUpdateEmail({ recipients = [], subject, title, message }
             bcc: bccList,
             subject,
             text,
-            html,
+            headers: antiPromoHeaders,
           });
           sentCount += bccList.length;
         } catch (err) {
