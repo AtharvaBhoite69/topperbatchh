@@ -19,10 +19,29 @@ function escapeHtml(str = '') {
     .replace(/'/g, '&#39;');
 }
 
+function htmlToPlainText(html = '') {
+  return String(html)
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|h1|h2|h3|li)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 /**
  * Reset cached transporter when admin updates SMTP settings in Control Room.
  */
 function resetTransporter() {
+  if (transporter && typeof transporter.close === 'function') {
+    try {
+      transporter.close();
+    } catch (_) {}
+  }
   transporter = null;
   cachedConfigHash = '';
 }
@@ -66,7 +85,7 @@ async function getSmtpConfig() {
 }
 
 /**
- * Get or create the email transporter.
+ * Get or create the pooled email transporter.
  */
 async function getTransporter() {
   const cfg = await getSmtpConfig();
@@ -81,6 +100,9 @@ async function getTransporter() {
   }
 
   transporter = nodemailer.createTransport({
+    pool: true,
+    maxConnections: 5,
+    maxMessages: 100,
     host: cfg.host,
     port: cfg.port,
     secure: cfg.port === 465,
@@ -96,12 +118,13 @@ async function getTransporter() {
 }
 
 /**
- * Send an email.
+ * Send an email with multipart plain-text + HTML for higher inbox deliverability.
  * @param {string} to - Recipient email
  * @param {string} subject - Email subject
  * @param {string} html - HTML body
+ * @param {string} [text] - Optional plain-text body
  */
-async function sendEmail(to, subject, html) {
+async function sendEmail(to, subject, html, text) {
   const { transport, cfg } = await getTransporter();
 
   if (!transport) {
@@ -112,8 +135,10 @@ async function sendEmail(to, subject, html) {
   try {
     const info = await transport.sendMail({
       from: `"TopperBatch" <${cfg.from}>`,
+      replyTo: cfg.from,
       to,
       subject,
+      text: text || htmlToPlainText(html),
       html,
     });
     console.log(`📧 Email sent to ${to}: ${info.messageId}`);
@@ -125,8 +150,9 @@ async function sendEmail(to, subject, html) {
 }
 
 /**
- * Send a formatted batch update email to multiple registered users via BCC chunks.
- * Keeps individual user email addresses private and avoids serverless timeouts.
+ * Send a formatted update email to multiple registered users.
+ * Sends individual To: emails via pooled connections for small/medium batches (best inbox delivery),
+ * and switches to BCC chunks for very large batches to stay under serverless timeouts.
  */
 async function sendBatchUpdateEmail({ recipients = [], subject, title, message, ctaUrl }) {
   const cleanEmails = Array.from(
@@ -158,7 +184,7 @@ async function sendBatchUpdateEmail({ recipients = [], subject, title, message, 
   const html = `
     <div style="font-family: Inter, Arial, sans-serif; max-width: 620px; margin: 0 auto; background: #F5E9D1; border: 3px solid #171510; padding: 24px; color: #171510;">
       <div style="background: #F5B900; border: 2px solid #171510; padding: 12px 16px; margin-bottom: 18px;">
-        <h1 style="margin: 0; font-size: 20px; letter-spacing: 1px; text-transform: uppercase;">⚡ TOPPERBATCH UPDATE</h1>
+        <h1 style="margin: 0; font-size: 20px; letter-spacing: 1px; text-transform: uppercase;">TOPPERBATCH UPDATE</h1>
         <p style="margin: 4px 0 0; font-size: 11px; font-weight: bold;">ISS SEM, 9 POINTER FIX!</p>
       </div>
       <div style="background: #FFFFFF; border: 2px solid #171510; padding: 18px;">
@@ -166,7 +192,7 @@ async function sendBatchUpdateEmail({ recipients = [], subject, title, message, 
         <div style="font-size: 14px; line-height: 1.6; color: #2b2923;">${safeBody}</div>
         <div style="margin-top: 20px;">
           <a href="${targetLink}" style="display: inline-block; padding: 10px 18px; background: #F5B900; color: #171510; font-weight: bold; text-decoration: none; border: 2px solid #171510;">
-            OPEN TOPPERBATCH →
+            Open TopperBatch
           </a>
         </div>
       </div>
@@ -176,32 +202,63 @@ async function sendBatchUpdateEmail({ recipients = [], subject, title, message, 
     </div>
   `;
 
-  const CHUNK_SIZE = 40;
+  const plainText = `${title || subject}\n\n${message}\n\nOpen TopperBatch: ${targetLink}\n\n---\nYou received this update because you registered on TopperBatch with this email address.`;
+
   let sentCount = 0;
   let lastError = null;
 
-  const chunks = [];
-  for (let i = 0; i < cleanEmails.length; i += CHUNK_SIZE) {
-    chunks.push(cleanEmails.slice(i, i + CHUNK_SIZE));
-  }
+  if (cleanEmails.length <= 35) {
+    // Direct To: delivery in batches of 5 over pooled connection avoids BCC spam filtering
+    const CONCURRENCY = 5;
+    for (let i = 0; i < cleanEmails.length; i += CONCURRENCY) {
+      const batch = cleanEmails.slice(i, i + CONCURRENCY);
+      await Promise.all(
+        batch.map(async (recipientEmail) => {
+          try {
+            await transport.sendMail({
+              from: `"TopperBatch" <${cfg.from}>`,
+              replyTo: cfg.from,
+              to: recipientEmail,
+              subject,
+              text: plainText,
+              html,
+            });
+            sentCount += 1;
+          } catch (err) {
+            lastError = err.message;
+            console.error(`Direct email error (${recipientEmail}):`, err.message);
+          }
+        })
+      );
+    }
+  } else {
+    // Large list: BCC chunks to stay safely within serverless execution timeout
+    const CHUNK_SIZE = 35;
+    const chunks = [];
+    for (let i = 0; i < cleanEmails.length; i += CHUNK_SIZE) {
+      chunks.push(cleanEmails.slice(i, i + CHUNK_SIZE));
+    }
 
-  await Promise.all(
-    chunks.map(async (bccList) => {
-      try {
-        await transport.sendMail({
-          from: `"TopperBatch" <${cfg.from}>`,
-          to: cfg.from,
-          bcc: bccList,
-          subject,
-          html,
-        });
-        sentCount += bccList.length;
-      } catch (err) {
-        lastError = err.message;
-        console.error('Batch email chunk error:', err.message);
-      }
-    })
-  );
+    await Promise.all(
+      chunks.map(async (bccList) => {
+        try {
+          await transport.sendMail({
+            from: `"TopperBatch" <${cfg.from}>`,
+            replyTo: cfg.from,
+            to: cfg.from,
+            bcc: bccList,
+            subject,
+            text: plainText,
+            html,
+          });
+          sentCount += bccList.length;
+        } catch (err) {
+          lastError = err.message;
+          console.error('Batch email chunk error:', err.message);
+        }
+      })
+    );
+  }
 
   return {
     totalRecipients: cleanEmails.length,
@@ -243,7 +300,7 @@ async function sendPasswordReset(email, token) {
 async function sendApprovalNotification(email, name) {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #1a1a2e;">Welcome to TopperBatch! 🎉</h2>
+      <h2 style="color: #1a1a2e;">Welcome to TopperBatch!</h2>
       <p>Hi ${escapeHtml(name)},</p>
       <p>Your account has been approved! You can now log in and start using TopperBatch.</p>
       <a href="${env.CLIENT_URL}/login" 
