@@ -201,7 +201,7 @@ export const Landing = () => {
             </span>
             <h4 className="font-heading text-xl uppercase mt-2 mb-1">RECRUIT</h4>
             <p className="font-sans text-xs text-olive-dark font-medium">
-              Register with your college email. Administrators verify your batch credentials.
+              Register with your Gmail ID. Administrators verify your batch credentials.
             </p>
           </div>
 

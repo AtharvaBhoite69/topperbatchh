@@ -116,9 +116,9 @@ export const Register = () => {
         />
 
         <ComicInput
-          label="College Email Address"
+          label="Gmail Address"
           type="email"
-          placeholder="student@college.edu"
+          placeholder="yourname@gmail.com"
           icon={<Mail className="w-4 h-4" />}
           value={email}
           onChange={(e) => setEmail(e.target.value)}

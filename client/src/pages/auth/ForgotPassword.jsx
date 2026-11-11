@@ -75,9 +75,9 @@ export const ForgotPassword = () => {
       ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
           <ComicInput
-            label="College Email"
+            label="Gmail Address"
             type="email"
-            placeholder="student@college.edu"
+            placeholder="yourname@gmail.com"
             icon={<Mail className="w-4 h-4" />}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
