@@ -59,10 +59,30 @@ export const admin = {
   getAnnouncements: (params) => api.get('/admin/announcements', { params }),
   updateAnnouncement: (id, data) => api.put(`/admin/announcements/${id}`, data),
   deleteAnnouncement: (id) => api.delete(`/admin/announcements/${id}`),
-  getSettings: () => api.get('/admin/settings'),
-  updateSettings: (data) => api.put('/admin/settings', data),
+  unlockControlRoom: (password) => api.post('/admin/control-room/unlock', { password }),
+  getSettings: () =>
+    api.get('/admin/settings', {
+      headers: {
+        'x-control-room-token': sessionStorage.getItem('topperbatch_control_room_token') || '',
+      },
+    }),
+  updateSettings: (data) =>
+    api.put('/admin/settings', data, {
+      headers: {
+        'x-control-room-token': sessionStorage.getItem('topperbatch_control_room_token') || '',
+      },
+    }),
   sendEmailBroadcast: (data) => api.post('/admin/email-broadcast', data),
-  sendTestEmail: () => api.post('/admin/email-test'),
+  sendTestEmail: () =>
+    api.post(
+      '/admin/email-test',
+      {},
+      {
+        headers: {
+          'x-control-room-token': sessionStorage.getItem('topperbatch_control_room_token') || '',
+        },
+      }
+    ),
   getActiveSessions: (params) => api.get('/admin/sessions', { params }),
   revokeSession: (id) => api.delete(`/admin/sessions/${id}`),
   revokeUserSessions: (userId) => api.delete(`/admin/sessions/user/${userId}`),

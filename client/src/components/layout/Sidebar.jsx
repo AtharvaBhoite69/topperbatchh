@@ -57,7 +57,7 @@ export const Sidebar = ({ isOpen, onClose }) => {
     { to: '/admin/questions', label: 'MCQ Forge', icon: ListChecks },
     { to: '/admin/challenges', label: 'Battle Planner', icon: Zap },
     { to: '/admin/announcements', label: 'Megaphone', icon: Megaphone },
-    { to: '/admin/settings', label: 'Control Room', icon: Settings },
+    { to: '/admin/settings', label: 'Control Room', icon: Settings, badge: '🔒' },
   ];
 
   return (

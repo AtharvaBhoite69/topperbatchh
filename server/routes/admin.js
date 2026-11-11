@@ -4,8 +4,11 @@
 // =============================================================================
 
 const express = require('express');
+const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
 const router = express.Router();
 
+const env = require('../config/env');
 const { getDb } = require('../database/db');
 const { generateId, paginate, sanitizeUser } = require('../utils/helpers');
 const { authenticate, requireAdmin } = require('../middleware/auth');
@@ -20,6 +23,73 @@ const {
 
 // All routes require authentication and admin role
 router.use(authenticate, requireAdmin);
+
+/**
+ * Middleware requiring Control Room passcode verification via short-lived token.
+ */
+function requireControlRoomUnlock(req, res, next) {
+  const unlockToken = req.headers['x-control-room-token'];
+  if (!unlockToken) {
+    return res.status(423).json({
+      error: 'Control Room is locked. Passcode required.',
+      locked: true,
+    });
+  }
+
+  try {
+    const decoded = jwt.verify(unlockToken, env.JWT_SECRET);
+    if (decoded.scope !== 'control_room' || decoded.userId !== req.user.id) {
+      return res.status(423).json({
+        error: 'Control Room lock session invalid. Please re-enter passcode.',
+        locked: true,
+      });
+    }
+    return next();
+  } catch (err) {
+    return res.status(423).json({
+      error: 'Control Room lock expired. Please re-enter passcode.',
+      locked: true,
+    });
+  }
+}
+
+/**
+ * POST /api/admin/control-room/unlock
+ * Verify Control Room passcode and issue a temporary unlock token.
+ */
+router.post('/control-room/unlock', async (req, res, next) => {
+  try {
+    const { password } = req.body || {};
+    if (!password || typeof password !== 'string') {
+      return res.status(400).json({ error: 'Control Room password is required.' });
+    }
+
+    const expected = String(env.CONTROL_ROOM_PASSWORD || '');
+    const providedHash = crypto.createHash('sha256').update(password).digest();
+    const expectedHash = crypto.createHash('sha256').update(expected).digest();
+
+    if (!crypto.timingSafeEqual(providedHash, expectedHash)) {
+      await logAudit(req.user.id, 'CONTROL_ROOM_UNLOCK_FAILED', 'control_room', null, null, req);
+      return res.status(403).json({ error: 'Incorrect Control Room password.' });
+    }
+
+    const unlockToken = jwt.sign(
+      { userId: req.user.id, scope: 'control_room' },
+      env.JWT_SECRET,
+      { expiresIn: '2h' }
+    );
+
+    await logAudit(req.user.id, 'CONTROL_ROOM_UNLOCKED', 'control_room', null, null, req);
+
+    return res.status(200).json({
+      success: true,
+      unlockToken,
+      message: 'Control Room unlocked.',
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 /**
  * Helper to log admin actions into audit_logs table
@@ -567,7 +637,7 @@ router.post('/email-broadcast', async (req, res, next) => {
  * POST /api/admin/email-test
  * Send a test email to the logged-in admin to verify SMTP configuration.
  */
-router.post('/email-test', async (req, res, next) => {
+router.post('/email-test', requireControlRoomUnlock, async (req, res, next) => {
   try {
     const cfg = await getSmtpConfig();
     if (!cfg.host || !cfg.user || !cfg.pass) {
@@ -667,7 +737,7 @@ router.delete('/announcements/:id', async (req, res, next) => {
 /**
  * GET /api/admin/settings
  */
-router.get('/settings', async (req, res, next) => {
+router.get('/settings', requireControlRoomUnlock, async (req, res, next) => {
   try {
     const db = getDb();
     const rows = await db.prepare('SELECT key, value FROM platform_settings').all();
@@ -699,7 +769,7 @@ router.get('/settings', async (req, res, next) => {
 /**
  * PUT /api/admin/settings
  */
-router.put('/settings', async (req, res, next) => {
+router.put('/settings', requireControlRoomUnlock, async (req, res, next) => {
   try {
     const settings = req.body || {};
     const db = getDb();

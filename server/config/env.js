@@ -35,8 +35,9 @@ const env = {
   SMTP_PASS: process.env.SMTP_PASS || '',
   SMTP_FROM: process.env.SMTP_FROM || 'noreply@topperbatch.com',
 
-  // Admin emails
+  // Admin emails & Control Room Lock
   ADMIN_EMAILS,
+  CONTROL_ROOM_PASSWORD: process.env.CONTROL_ROOM_PASSWORD || 'Jockey@6769',
 
   // Database & Supabase
   DATABASE_URL: process.env.DATABASE_URL || '',
