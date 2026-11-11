@@ -19,7 +19,7 @@ const ADMIN_EMAILS = [
 const env = {
   NODE_ENV: process.env.NODE_ENV || 'development',
   PORT: parseInt(process.env.PORT, 10) || 5000,
-  CLIENT_URL: process.env.CLIENT_URL || 'http://localhost:3000',
+  CLIENT_URL: process.env.CLIENT_URL || 'https://topperbatchh-awmn.vercel.app',
 
   // JWT
   JWT_SECRET: process.env.JWT_SECRET || 'topperbatch-permanent-production-secret-2024-jwt-key',

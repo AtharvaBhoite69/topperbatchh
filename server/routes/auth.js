@@ -304,7 +304,7 @@ router.post('/forgot-password', authLimiter, async (req, res, next) => {
     `).run(generateId(), user.id, tokenHash, expiresAt);
 
     // Send email or log to console
-    await sendPasswordReset(normalizedEmail, resetToken);
+    await sendPasswordReset(normalizedEmail, resetToken, req.get('origin'));
 
     // In development mode, return token so developer can test without an active SMTP server
     if (env.NODE_ENV === 'development') {

@@ -252,7 +252,7 @@ async function handleRegistrationAction(req, res, next) {
     // Attempt email notification gracefully
     try {
       if (action === 'approve') {
-        await sendApprovalNotification(user.email, user.full_name);
+        await sendApprovalNotification(user.email, user.full_name, req.get('origin'));
       } else {
         await sendRejectionNotification(user.email, user.full_name);
       }
