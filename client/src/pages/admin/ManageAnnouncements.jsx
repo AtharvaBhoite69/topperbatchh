@@ -283,9 +283,9 @@ export const ManageAnnouncements = () => {
               </h3>
             </div>
             <p className="font-sans text-xs text-olive-dark mb-4">
-              Emails are sent privately via BCC batches. Make sure SMTP sender is saved in{' '}
+              Send direct email updates to registered students. Configure SMTP settings in{' '}
               <Link to="/admin/settings" className="underline font-bold text-punch-red">
-                Control Room → Email / SMTP Sender
+                Control Room
               </Link>
               .
             </p>

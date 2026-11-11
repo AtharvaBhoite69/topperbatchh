@@ -186,13 +186,13 @@ export const PlatformSettings = () => {
           </div>
         </div>
 
-        {/* Email & SMTP Configuration (No Redeploy Needed) */}
+        {/* Email & SMTP Configuration */}
         <div className="comic-box bg-white p-6 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b-2 border-ink/20 pb-2">
             <div className="flex items-center gap-2">
               <Mail className="w-5 h-5 text-punch-red" />
               <h3 className="font-heading text-xl uppercase tracking-wide text-ink">
-                EMAIL / SMTP SENDER (NO REDEPLOY NEEDED)
+                EMAIL / SMTP SENDER CONFIGURATION
               </h3>
             </div>
             <span
@@ -205,7 +205,7 @@ export const PlatformSettings = () => {
           </div>
 
           <p className="font-sans text-xs text-olive-dark">
-            Configure Gmail (with a 16-character Google App Password) or Brevo/Resend SMTP here to send email updates directly to registered users&apos; email IDs without touching Vercel env vars or redeploying.
+            Configure the SMTP credentials used to send batch updates and notifications to registered students.
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -281,7 +281,7 @@ export const PlatformSettings = () => {
 
           <div className="pt-1 flex flex-wrap items-center justify-between gap-2">
             <span className="font-mono text-[10px] text-ink/70">
-              Tip: Click &quot;SAVE PLATFORM CONFIGURATION&quot; first, then test delivery.
+              Save configuration changes before testing delivery.
             </span>
             <button
               type="button"
