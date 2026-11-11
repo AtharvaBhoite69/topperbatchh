@@ -263,6 +263,14 @@ router.get('/:id/view', requireApproved, async (req, res, next) => {
 
     // 1. Check Supabase Storage Private Signed URL (1-hour validity)
     const signedUrl = await getSignedDownloadUrl(BUCKET_DOCUMENTS, doc.filename, 3600);
+    if (req.query.format === 'url') {
+      return res.status(200).json({
+        success: true,
+        url: signedUrl || `/api/documents/${id}/view`,
+        isSignedUrl: !!signedUrl,
+      });
+    }
+
     if (signedUrl) {
       return res.redirect(signedUrl);
     }
