@@ -467,11 +467,13 @@ router.post('/announcements', async (req, res, next) => {
       if (audience === 'all') {
         recipientRows = await db.prepare("SELECT email FROM users WHERE status IN ('approved', 'pending')").all();
       }
+      const origin = req.get('origin') || `${req.protocol}://${req.get('host')}`;
       emailResult = await sendBatchUpdateEmail({
         recipients: recipientRows.map((r) => r.email),
         subject: `[TopperBatch] ${title.trim()}`,
         title: title.trim(),
         message: content.trim(),
+        ctaUrl: `${origin}/dashboard`,
       });
     }
 
@@ -518,12 +520,14 @@ router.post('/email-broadcast', async (req, res, next) => {
       query = "SELECT email FROM users WHERE status = 'pending'";
     }
 
+    const origin = req.get('origin') || `${req.protocol}://${req.get('host')}`;
     const rows = await db.prepare(query).all();
     const result = await sendBatchUpdateEmail({
       recipients: rows.map((r) => r.email),
       subject: subject.trim(),
       title: (title || subject).trim(),
       message: message.trim(),
+      ctaUrl: `${origin}/dashboard`,
     });
 
     await logAudit(
