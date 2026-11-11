@@ -9,7 +9,14 @@ const router = express.Router();
 const { getDb } = require('../database/db');
 const { generateId, paginate, sanitizeUser } = require('../utils/helpers');
 const { authenticate, requireAdmin } = require('../middleware/auth');
-const { sendApprovalNotification, sendRejectionNotification } = require('../services/email');
+const {
+  sendEmail,
+  sendBatchUpdateEmail,
+  sendApprovalNotification,
+  sendRejectionNotification,
+  resetTransporter,
+  getSmtpConfig,
+} = require('../services/email');
 
 // All routes require authentication and admin role
 router.use(authenticate, requireAdmin);
@@ -430,7 +437,7 @@ router.get('/audit-logs', async (req, res, next) => {
  */
 router.post('/announcements', async (req, res, next) => {
   try {
-    const { title, content, priority = 'normal', expiresAt } = req.body;
+    const { title, content, priority = 'normal', expiresAt, sendEmail: shouldEmail = false, audience = 'approved' } = req.body;
     if (!title || !content) {
       return res.status(400).json({ error: 'Title and content are required.' });
     }
@@ -443,8 +450,8 @@ router.post('/announcements', async (req, res, next) => {
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(announcementId, title.trim(), content.trim(), priority, req.user.id, expiresAt || null);
 
-    // Notify all approved students
-    const students = await db.prepare("SELECT id FROM users WHERE status = 'approved'").all();
+    // Notify all approved students in-app
+    const students = await db.prepare("SELECT id, email FROM users WHERE status = 'approved'").all();
     const notifyStmt = db.prepare(`
       INSERT INTO notifications (id, user_id, type, title, message, link)
       VALUES (?, ?, 'announcement', ?, ?, '/dashboard')
@@ -454,12 +461,136 @@ router.post('/announcements', async (req, res, next) => {
       await notifyStmt.run(generateId(), student.id, `📢 ${title}`, content.slice(0, 100));
     }
 
-    await logAudit(req.user.id, 'CREATE_ANNOUNCEMENT', 'announcement', announcementId, { title, priority }, req);
+    let emailResult = null;
+    if (shouldEmail) {
+      let recipientRows = students;
+      if (audience === 'all') {
+        recipientRows = await db.prepare("SELECT email FROM users WHERE status IN ('approved', 'pending')").all();
+      }
+      emailResult = await sendBatchUpdateEmail({
+        recipients: recipientRows.map((r) => r.email),
+        subject: `[TopperBatch] ${title.trim()}`,
+        title: title.trim(),
+        message: content.trim(),
+      });
+    }
+
+    await logAudit(
+      req.user.id,
+      'CREATE_ANNOUNCEMENT',
+      'announcement',
+      announcementId,
+      { title, priority, sendEmail: Boolean(shouldEmail), emailSentCount: emailResult?.sentCount || 0 },
+      req
+    );
 
     return res.status(201).json({
       success: true,
-      message: 'Announcement published to batch!',
+      message: emailResult && !emailResult.skipped
+        ? `Announcement published & emailed to ${emailResult.sentCount} registered user(s)!`
+        : emailResult?.skipped
+          ? `Announcement published in-app! (Email skipped: ${emailResult.error})`
+          : 'Announcement published to batch!',
       announcementId,
+      emailResult,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/admin/email-broadcast
+ * Send a direct email update to registered users on their registered email IDs.
+ */
+router.post('/email-broadcast', async (req, res, next) => {
+  try {
+    const { subject, title, message, audience = 'approved' } = req.body;
+    if (!subject?.trim() || !message?.trim()) {
+      return res.status(400).json({ error: 'Email subject and message are required.' });
+    }
+
+    const db = getDb();
+    let query = "SELECT email FROM users WHERE status = 'approved'";
+    if (audience === 'all') {
+      query = "SELECT email FROM users WHERE status IN ('approved', 'pending')";
+    } else if (audience === 'pending') {
+      query = "SELECT email FROM users WHERE status = 'pending'";
+    }
+
+    const rows = await db.prepare(query).all();
+    const result = await sendBatchUpdateEmail({
+      recipients: rows.map((r) => r.email),
+      subject: subject.trim(),
+      title: (title || subject).trim(),
+      message: message.trim(),
+    });
+
+    await logAudit(
+      req.user.id,
+      'SEND_EMAIL_BROADCAST',
+      'email',
+      null,
+      { subject: subject.trim(), audience, totalRecipients: result.totalRecipients, sentCount: result.sentCount },
+      req
+    );
+
+    if (result.skipped) {
+      return res.status(400).json({
+        error: result.error || 'Email could not be sent. Check SMTP settings in Control Room.',
+        result,
+      });
+    }
+
+    if (result.sentCount === 0 && result.error) {
+      return res.status(502).json({
+        error: `SMTP Error: ${result.error}`,
+        result,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Update emailed to ${result.sentCount} registered user(s)!`,
+      result,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/admin/email-test
+ * Send a test email to the logged-in admin to verify SMTP configuration.
+ */
+router.post('/email-test', async (req, res, next) => {
+  try {
+    const cfg = await getSmtpConfig();
+    if (!cfg.host || !cfg.user || !cfg.pass) {
+      return res.status(400).json({
+        error: 'SMTP settings are incomplete. Please fill SMTP Host, Sender Email, and App Password and save first.',
+      });
+    }
+
+    const info = await sendEmail(
+      req.user.email,
+      'TopperBatch SMTP Test Successful ⚡',
+      `<div style="font-family: Arial, sans-serif; padding: 16px; border: 2px solid #171510; background: #F5E9D1;">
+        <h2 style="margin-top:0;">✅ TopperBatch Email Service Working!</h2>
+        <p>Hi ${req.user.full_name},</p>
+        <p>Your SMTP configuration is verified. You can now send updates directly to registered users' email IDs.</p>
+      </div>`
+    );
+
+    if (info?.skipped || info?.error) {
+      return res.status(502).json({
+        error: info?.error || 'Failed to send test email.',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Test email sent to ${req.user.email}!`,
     });
   } catch (err) {
     next(err);
@@ -534,10 +665,25 @@ router.get('/settings', async (req, res, next) => {
     const db = getDb();
     const rows = await db.prepare('SELECT key, value FROM platform_settings').all();
     const settings = {};
+    let smtpPassConfigured = false;
     for (const r of rows) {
-      settings[r.key] = r.value;
+      if (r.key === 'smtp_pass') {
+        smtpPassConfigured = Boolean(r.value);
+        settings.smtp_pass = '';
+      } else {
+        settings[r.key] = r.value;
+      }
     }
-    return res.status(200).json({ success: true, settings });
+
+    const activeSmtp = await getSmtpConfig();
+    return res.status(200).json({
+      success: true,
+      settings,
+      meta: {
+        smtp_pass_configured: smtpPassConfigured,
+        smtp_ready: Boolean(activeSmtp.host && activeSmtp.user && activeSmtp.pass),
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -548,7 +694,7 @@ router.get('/settings', async (req, res, next) => {
  */
 router.put('/settings', async (req, res, next) => {
   try {
-    const settings = req.body;
+    const settings = req.body || {};
     const db = getDb();
 
     const upsertStmt = db.prepare(`
@@ -557,11 +703,18 @@ router.put('/settings', async (req, res, next) => {
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
     `);
 
+    const auditSafeSettings = {};
     for (const [k, v] of Object.entries(settings)) {
+      // Preserve existing SMTP password if admin leaves the masked password field blank
+      if (k === 'smtp_pass' && !String(v || '').trim()) {
+        continue;
+      }
       await upsertStmt.run(k, String(v));
+      auditSafeSettings[k] = k === 'smtp_pass' ? '***REDACTED***' : String(v);
     }
 
-    await logAudit(req.user.id, 'UPDATE_SETTINGS', 'platform_settings', null, settings, req);
+    resetTransporter();
+    await logAudit(req.user.id, 'UPDATE_SETTINGS', 'platform_settings', null, auditSafeSettings, req);
 
     return res.status(200).json({ success: true, message: 'Platform settings saved.' });
   } catch (err) {

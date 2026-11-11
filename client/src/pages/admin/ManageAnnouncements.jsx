@@ -1,22 +1,31 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import ComicButton from '../../components/ui/ComicButton';
 import ComicCard from '../../components/ui/ComicCard';
 import ComicInput from '../../components/ui/ComicInput';
 import { EmptyState, LoadingSkeleton } from '../../components/ui/ComicElements';
 import { admin as adminApi } from '../../services/api';
-import { Megaphone, Plus, Trash2 } from 'lucide-react';
+import { Megaphone, Plus, Trash2, Mail, Send } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const ManageAnnouncements = () => {
   const [announcements, setAnnouncements] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Form state
+  // Form state (Announcement modal)
   const [showModal, setShowModal] = useState(false);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [priority, setPriority] = useState('normal');
+  const [sendEmailWithAnnouncement, setSendEmailWithAnnouncement] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Standalone Email Broadcast modal state
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailMessage, setEmailMessage] = useState('');
+  const [emailAudience, setEmailAudience] = useState('approved');
+  const [sendingEmail, setSendingEmail] = useState(false);
 
   useEffect(() => {
     fetchAnnouncements();
@@ -46,19 +55,47 @@ export const ManageAnnouncements = () => {
         title: title.trim(),
         content: content.trim(),
         priority,
+        sendEmail: sendEmailWithAnnouncement,
       });
 
       if (res.data?.success) {
-        toast.success('Announcement broadcasted to entire batch!');
+        toast.success(res.data.message || 'Announcement broadcasted to entire batch!');
         setShowModal(false);
         setTitle('');
         setContent('');
+        setSendEmailWithAnnouncement(false);
         fetchAnnouncements();
       }
     } catch (err) {
       toast.error('Failed to publish announcement.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSendEmailBroadcast = async (e) => {
+    e.preventDefault();
+    if (!emailSubject.trim() || !emailMessage.trim()) return;
+
+    setSendingEmail(true);
+    try {
+      const res = await adminApi.sendEmailBroadcast({
+        subject: emailSubject.trim(),
+        title: emailSubject.trim(),
+        message: emailMessage.trim(),
+        audience: emailAudience,
+      });
+
+      if (res.data?.success) {
+        toast.success(res.data.message || 'Email update sent to registered users!');
+        setShowEmailModal(false);
+        setEmailSubject('');
+        setEmailMessage('');
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Could not send email update.');
+    } finally {
+      setSendingEmail(false);
     }
   };
 
@@ -84,18 +121,29 @@ export const ManageAnnouncements = () => {
             </h1>
           </div>
           <p className="font-sans text-xs text-olive-dark font-medium max-w-xl">
-            Broadcast platform updates, exam dates, syllabus revisions, and urgent notices to all approved students.
+            Broadcast platform updates, exam dates, syllabus revisions, and email updates directly to registered users&apos; email IDs.
           </p>
         </div>
 
-        <ComicButton
-          variant="yellow"
-          size="sm"
-          onClick={() => setShowModal(true)}
-          icon={<Plus className="w-4 h-4" />}
-        >
-          NEW BROADCAST
-        </ComicButton>
+        <div className="flex flex-wrap items-center gap-2">
+          <ComicButton
+            variant="white"
+            size="sm"
+            onClick={() => setShowEmailModal(true)}
+            icon={<Mail className="w-4 h-4 text-punch-red" />}
+          >
+            SEND EMAIL UPDATE
+          </ComicButton>
+
+          <ComicButton
+            variant="yellow"
+            size="sm"
+            onClick={() => setShowModal(true)}
+            icon={<Plus className="w-4 h-4" />}
+          >
+            NEW BROADCAST
+          </ComicButton>
+        </div>
       </div>
 
       {loading ? (
@@ -195,6 +243,18 @@ export const ManageAnnouncements = () => {
                 </select>
               </div>
 
+              <label className="flex items-center gap-2 p-2.5 bg-white border-2 border-ink rounded cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={sendEmailWithAnnouncement}
+                  onChange={(e) => setSendEmailWithAnnouncement(e.target.checked)}
+                  className="w-4 h-4 accent-punch-red"
+                />
+                <span className="font-sans text-xs font-bold text-ink">
+                  Also send this update via Email to all approved students&apos; registered email IDs
+                </span>
+              </label>
+
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
@@ -205,6 +265,81 @@ export const ManageAnnouncements = () => {
                 </button>
                 <ComicButton type="submit" variant="yellow" size="sm" loading={saving}>
                   BROADCAST NOW
+                </ComicButton>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Standalone Email Update Modal */}
+      {showEmailModal && (
+        <div className="fixed inset-0 z-50 bg-ink/70 flex items-center justify-center p-4">
+          <div className="comic-box-lg max-w-lg w-full bg-cream p-6 animate-in fade-in max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center gap-2 mb-2">
+              <Mail className="w-5 h-5 text-punch-red" />
+              <h3 className="font-heading text-2xl uppercase tracking-wide text-ink">
+                EMAIL REGISTERED USERS
+              </h3>
+            </div>
+            <p className="font-sans text-xs text-olive-dark mb-4">
+              Emails are sent privately via BCC batches. Make sure SMTP sender is saved in{' '}
+              <Link to="/admin/settings" className="underline font-bold text-punch-red">
+                Control Room → Email / SMTP Sender
+              </Link>
+              .
+            </p>
+
+            <form onSubmit={handleSendEmailBroadcast} className="space-y-4">
+              <div>
+                <label className="font-comic text-xs uppercase text-ink block mb-1">
+                  TARGET AUDIENCE
+                </label>
+                <select
+                  value={emailAudience}
+                  onChange={(e) => setEmailAudience(e.target.value)}
+                  className="comic-input text-xs py-2 bg-white"
+                >
+                  <option value="approved">Approved Students Only</option>
+                  <option value="all">All Registered Users (Approved + Pending)</option>
+                  <option value="pending">Pending Approval Users Only</option>
+                </select>
+              </div>
+
+              <ComicInput
+                label="Email Subject"
+                placeholder="e.g. New Question Bank Uploaded for Sem 6"
+                value={emailSubject}
+                onChange={(e) => setEmailSubject(e.target.value)}
+                required
+              />
+
+              <ComicInput
+                label="Email Update Message"
+                textarea={true}
+                rows={5}
+                placeholder="Write the full update you want sent to students' registered Gmail/email IDs..."
+                value={emailMessage}
+                onChange={(e) => setEmailMessage(e.target.value)}
+                required
+              />
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEmailModal(false)}
+                  className="comic-btn comic-btn-white text-xs"
+                >
+                  CANCEL
+                </button>
+                <ComicButton
+                  type="submit"
+                  variant="yellow"
+                  size="sm"
+                  loading={sendingEmail}
+                  icon={<Send className="w-3.5 h-3.5" />}
+                >
+                  SEND EMAIL UPDATE
                 </ComicButton>
               </div>
             </form>
