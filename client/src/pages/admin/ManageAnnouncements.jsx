@@ -26,6 +26,7 @@ export const ManageAnnouncements = () => {
   const [emailMessage, setEmailMessage] = useState('');
   const [emailAudience, setEmailAudience] = useState('approved');
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [emailProgress, setEmailProgress] = useState('');
 
   useEffect(() => {
     fetchAnnouncements();
@@ -78,24 +79,50 @@ export const ManageAnnouncements = () => {
     if (!emailSubject.trim() || !emailMessage.trim()) return;
 
     setSendingEmail(true);
-    try {
-      const res = await adminApi.sendEmailBroadcast({
-        subject: emailSubject.trim(),
-        title: emailSubject.trim(),
-        message: emailMessage.trim(),
-        audience: emailAudience,
-      });
+    setEmailProgress('Starting...');
 
-      if (res.data?.success) {
-        toast.success(res.data.message || 'Email update sent to registered users!');
-        setShowEmailModal(false);
-        setEmailSubject('');
-        setEmailMessage('');
+    try {
+      let offset = 0;
+      let totalSent = 0;
+      let totalAudience = 0;
+      let hasMore = true;
+
+      while (hasMore) {
+        const res = await adminApi.sendEmailBroadcast({
+          subject: emailSubject.trim(),
+          title: emailSubject.trim(),
+          message: emailMessage.trim(),
+          audience: emailAudience,
+          offset,
+          limit: 10,
+        });
+
+        const result = res.data?.result;
+        if (!res.data?.success || !result) {
+          throw new Error(res.data?.error || 'Could not send email update.');
+        }
+
+        totalSent += result.sentCount || 0;
+        totalAudience = result.totalAudience || totalSent;
+        hasMore = Boolean(result.hasMore);
+        offset = result.nextOffset || offset + 10;
+
+        setEmailProgress(`Sent ${Math.min(offset, totalAudience)} / ${totalAudience}`);
+
+        if (hasMore) {
+          await new Promise((r) => setTimeout(r, 700));
+        }
       }
+
+      toast.success(`Update emailed to ${totalSent} registered user(s)!`);
+      setShowEmailModal(false);
+      setEmailSubject('');
+      setEmailMessage('');
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Could not send email update.');
+      toast.error(err.response?.data?.error || err.message || 'Could not send email update.');
     } finally {
       setSendingEmail(false);
+      setEmailProgress('');
     }
   };
 
@@ -339,7 +366,7 @@ export const ManageAnnouncements = () => {
                   loading={sendingEmail}
                   icon={<Send className="w-3.5 h-3.5" />}
                 >
-                  SEND EMAIL UPDATE
+                  {emailProgress || 'SEND EMAIL UPDATE'}
                 </ComicButton>
               </div>
             </form>

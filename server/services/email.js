@@ -99,12 +99,14 @@ async function getTransporter() {
     return { transport: transporter, cfg };
   }
 
+  const isGmailHost = cfg.host.toLowerCase().includes('gmail.com');
+
   transporter = nodemailer.createTransport({
     pool: true,
-    maxConnections: 2,
+    maxConnections: isGmailHost ? 1 : 2,
     maxMessages: 100,
     rateDelta: 1000,
-    rateLimit: 6,
+    rateLimit: isGmailHost ? 4 : 6,
     host: cfg.host,
     port: cfg.port,
     secure: cfg.port === 465,
@@ -185,26 +187,29 @@ async function sendBatchUpdateEmail({ recipients = [], subject, title, message }
     };
   }
 
+  const isGmailHost = cfg.host.toLowerCase().includes('gmail.com');
   const buildContent = (firstName) => {
     const headerLine = title && title.trim() !== subject.trim() ? `${title.trim()}\n\n` : '';
     const text = `Hi ${firstName},\n\n${headerLine}${message}\n\nRegards,\nTopperBatch Team`;
     return { text };
   };
 
-  // Disable Brevo open/click tracking headers so Gmail doesn't classify updates as Promotions
-  const antiPromoHeaders = {
-    'X-Mailin-Track': '0',
-    'X-Mailin-Track-Links': '0',
-  };
+  // Only attach Brevo tracking opt-out headers when using Brevo relay
+  const extraHeaders = isGmailHost
+    ? undefined
+    : {
+        'X-Mailin-Track': '0',
+        'X-Mailin-Track-Links': '0',
+      };
 
   let sentCount = 0;
   let lastError = null;
 
   if (recipientList.length <= 100) {
-    // Individual personalized To: emails in controlled batches of 3
-    const CONCURRENCY = 3;
-    for (let i = 0; i < recipientList.length; i += CONCURRENCY) {
-      const batch = recipientList.slice(i, i + CONCURRENCY);
+    // Gmail gets strict 1-by-1 sequential delivery with 180ms spacing to avoid anti-bot triggers
+    const concurrency = isGmailHost ? 1 : 3;
+    for (let i = 0; i < recipientList.length; i += concurrency) {
+      const batch = recipientList.slice(i, i + concurrency);
       await Promise.all(
         batch.map(async ({ email, firstName }) => {
           const { text } = buildContent(firstName);
@@ -215,7 +220,7 @@ async function sendBatchUpdateEmail({ recipients = [], subject, title, message }
               to: email,
               subject,
               text,
-              headers: antiPromoHeaders,
+              ...(extraHeaders ? { headers: extraHeaders } : {}),
             });
             sentCount += 1;
           } catch (err) {
@@ -224,6 +229,9 @@ async function sendBatchUpdateEmail({ recipients = [], subject, title, message }
           }
         })
       );
+      if (isGmailHost && i + concurrency < recipientList.length) {
+        await new Promise((r) => setTimeout(r, 180));
+      }
     }
   } else {
     const CHUNK_SIZE = 35;
@@ -243,7 +251,7 @@ async function sendBatchUpdateEmail({ recipients = [], subject, title, message }
             bcc: bccList,
             subject,
             text,
-            headers: antiPromoHeaders,
+            ...(extraHeaders ? { headers: extraHeaders } : {}),
           });
           sentCount += bccList.length;
         } catch (err) {

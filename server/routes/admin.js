@@ -575,33 +575,50 @@ router.post('/announcements', async (req, res, next) => {
  */
 router.post('/email-broadcast', async (req, res, next) => {
   try {
-    const { subject, title, message, audience = 'approved' } = req.body;
+    const { subject, title, message, audience = 'approved', offset = 0, limit = 0 } = req.body;
     if (!subject?.trim() || !message?.trim()) {
       return res.status(400).json({ error: 'Email subject and message are required.' });
     }
 
     const db = getDb();
-    let query = "SELECT email, full_name FROM users WHERE status = 'approved'";
+    let whereClause = "status = 'approved'";
     if (audience === 'all') {
-      query = "SELECT email, full_name FROM users WHERE status IN ('approved', 'pending')";
+      whereClause = "status IN ('approved', 'pending')";
     } else if (audience === 'pending') {
-      query = "SELECT email, full_name FROM users WHERE status = 'pending'";
+      whereClause = "status = 'pending'";
     }
 
-    const rows = await db.prepare(query).all();
+    const allRows = await db
+      .prepare(`SELECT email, full_name FROM users WHERE ${whereClause} ORDER BY created_at ASC`)
+      .all();
+
+    const start = Math.max(0, parseInt(offset, 10) || 0);
+    const batchSize = parseInt(limit, 10) || 0;
+    const slicedRows = batchSize > 0 ? allRows.slice(start, start + batchSize) : allRows;
+
     const result = await sendBatchUpdateEmail({
-      recipients: rows.map((r) => ({ email: r.email, name: r.full_name })),
+      recipients: slicedRows.map((r) => ({ email: r.email, name: r.full_name })),
       subject: subject.trim(),
       title: (title || subject).trim(),
       message: message.trim(),
     });
+
+    const nextOffset = batchSize > 0 ? start + slicedRows.length : allRows.length;
+    const hasMore = batchSize > 0 && nextOffset < allRows.length;
 
     await logAudit(
       req.user.id,
       'SEND_EMAIL_BROADCAST',
       'email',
       null,
-      { subject: subject.trim(), audience, totalRecipients: result.totalRecipients, sentCount: result.sentCount },
+      {
+        subject: subject.trim(),
+        audience,
+        offset: start,
+        batchTotal: slicedRows.length,
+        totalRecipients: allRows.length,
+        sentCount: result.sentCount,
+      },
       req
     );
 
@@ -622,7 +639,12 @@ router.post('/email-broadcast', async (req, res, next) => {
     return res.status(200).json({
       success: true,
       message: `Update emailed to ${result.sentCount} registered user(s)!`,
-      result,
+      result: {
+        ...result,
+        totalAudience: allRows.length,
+        nextOffset,
+        hasMore,
+      },
     });
   } catch (err) {
     next(err);
