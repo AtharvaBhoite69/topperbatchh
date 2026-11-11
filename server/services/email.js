@@ -136,6 +136,14 @@ async function sendEmail(to, subject, html, text) {
     return { messageId: 'unconfigured-smtp-skipped', skipped: true };
   }
 
+  const isGmailHost = cfg.host.toLowerCase().includes('gmail.com');
+  const extraHeaders = isGmailHost
+    ? undefined
+    : {
+        'X-Mailin-Track': '0',
+        'X-Mailin-Track-Links': '0',
+      };
+
   try {
     const info = await transport.sendMail({
       from: `"TopperBatch" <${cfg.from}>`,
@@ -143,7 +151,8 @@ async function sendEmail(to, subject, html, text) {
       to,
       subject,
       text: text || htmlToPlainText(html),
-      html,
+      ...(html ? { html } : {}),
+      ...(extraHeaders ? { headers: extraHeaders } : {}),
     });
     console.log(`📧 Email sent to ${to}: ${info.messageId}`);
     return info;

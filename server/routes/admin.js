@@ -667,12 +667,8 @@ router.post('/email-test', requireControlRoomUnlock, async (req, res, next) => {
     const info = await sendEmail(
       req.user.email,
       'TopperBatch Email Configuration Test',
-      `<div style="font-family: Arial, sans-serif; padding: 16px; border: 2px solid #171510; background: #F5E9D1;">
-        <h2 style="margin-top:0;">TopperBatch Email Service Working</h2>
-        <p>Hi ${req.user.full_name},</p>
-        <p>Your SMTP configuration (${cfg.from}) is verified. You can now send updates directly to registered users' email IDs.</p>
-      </div>`,
-      `Hi ${req.user.full_name},\n\nYour TopperBatch SMTP configuration (${cfg.from}) is verified. You can now send updates directly to registered users' email IDs.`
+      null,
+      `Hi ${req.user.full_name},\n\nYour TopperBatch SMTP configuration (${cfg.from}) is verified. You can now send updates directly to registered users' email IDs.\n\nRegards,\nTopperBatch Team`
     );
 
     if (info?.skipped || info?.error) {
