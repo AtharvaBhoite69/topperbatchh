@@ -114,7 +114,7 @@ async function generateMCQsFromPDF({
     if (combinedContext.length > 35000) break; // generous ~8,000 words
   }
 
-  const prompt = `You are an expert engineering exam setter. Create Multiple Choice Questions (MCQs) for an engineering examination strictly based on the provided PDF material below.
+  const prompt = `You are a senior engineering professor creating real university-level Multiple Choice Questions (MCQs) from the provided PDF material.
 
 SOURCE PDF: "${originalName}"
 TOTAL PAGES: ${totalPages}
@@ -124,37 +124,45 @@ QUESTION STYLE: ${questionStyle} (Conceptual, Definition-based, Application-base
 ${topic ? `SPECIFIC TOPIC / MODULE: ${topic}` : ''}
 ${instructions ? `ADMINISTRATOR CUSTOM INSTRUCTIONS: ${instructions}` : ''}
 
-STRICT EXAM COMPLIANCE RULES:
-1. SOURCE FIDELITY: Generate questions derived ONLY and DIRECTLY from the text in the provided PDF pages below.
-   - DO NOT invent facts or inject general-knowledge questions outside the scope of this PDF.
-   - If the PDF has limited content to safely create ${count} unique high-quality questions, generate as many verified questions as possible (e.g. 4 or 6) and provide an "insufficient_content_reason".
-2. OPTIONS STRUCTURE:
+CRITICAL CONTENT & QUESTION-BANK RULES:
+1. TURN QUESTION BANKS & SYLLABI INTO REAL TECHNICAL MCQs (SOLVE THEM FIRST!):
+   - Many uploaded PDFs are Question Banks (e.g. "Q1. Explain Backpropagation", "Q2. Compare TCP vs UDP") or Syllabus Module lists WITHOUT written answers inside the PDF.
+   - When the PDF contains a question prompt or syllabus topic WITHOUT its solution:
+     1) READ the question/topic carefully.
+     2) SOLVE the question / recall the verified engineering concept yourself as a subject-matter expert.
+     3) CREATE a challenging technical MCQ testing the core concept, formula, algorithm, architecture, or comparison of that answer!
+   - When the PDF contains full study notes/derivations, base both the question and verified answer directly on those notes.
+2. STRICTLY FORBIDDEN META-QUESTIONS (ZERO STUPID QUESTIONS):
+   - NEVER ask about the PDF layout or numbering itself!
+   - STRICTLY BANNED examples: "What is asked in Question 1?", "Which module contains X?", "How many marks is Q3?", "On which page is topic Y?", "What is the subject code?", "Who is the author of reference book 1?".
+   - Every single MCQ must test genuine technical/subject understanding that a student needs to score 9+ CGPA in the exam!
+3. OPTIONS STRUCTURE:
    - Every question must have EXACTLY 4 answer options: "A", "B", "C", and "D".
    - EXACTLY ONE option must be correct.
-   - The distractors (wrong options) must be plausible engineering distractors based on the subject matter, not joke options.
-3. DETAILED EXPLANATION:
-   - Provide a comprehensive, step-by-step academic explanation of why the correct option is right and cite the specific concept.
-4. CITATION & PAGE REFERENCE:
-   - Identify the exact page number (integer) from the [PAGE X] headers where this question's answer is located.
-5. FORMAT:
-   - Return a valid JSON object matching this schema EXACTLY:
+   - All 3 wrong options (distractors) must be realistic, plausible engineering concepts — never joke options or "All/None of the above" filler unless mathematically necessary.
+4. DETAILED EXPLANATION:
+   - Explain the engineering reasoning clearly so the student learns WHY the correct option is right and why the other options are wrong.
+5. CITATION & PAGE REFERENCE:
+   - Set "source_page" to the integer page number from [PAGE X] where that topic/question appears.
+6. FORMAT:
+   - Return ONLY a valid JSON object matching this schema EXACTLY:
 {
-  "summary": "Brief 1-sentence overview of the questions generated from this PDF.",
+  "summary": "Brief 1-sentence overview of the technical topics covered by these MCQs.",
   "insufficient_content_reason": null,
   "questions": [
     {
       "id": "q1",
-      "question": "What is the primary function of ...?",
+      "question": "Clear technical engineering question testing the concept (never about PDF numbering/marks)?",
       "options": [
-        { "label": "A", "text": "First option text" },
-        { "label": "B", "text": "Second option text" },
-        { "label": "C", "text": "Third option text" },
-        { "label": "D", "text": "Fourth option text" }
+        { "label": "A", "text": "First technical option" },
+        { "label": "B", "text": "Second technical option" },
+        { "label": "C", "text": "Third technical option" },
+        { "label": "D", "text": "Fourth technical option" }
       ],
       "correct_answer": "A",
-      "explanation": "Option A is correct because on page 2...",
+      "explanation": "Clear technical explanation of the answer and why other options are incorrect.",
       "source_page": 2,
-      "topic": "Module name or identifiable subject topic",
+      "topic": "Specific engineering topic name",
       "difficulty": "medium"
     }
   ]
@@ -281,9 +289,13 @@ async function regenerateSingleQuestion({
   const targetPage = extraction.pages.find((p) => p.pageNumber === parseInt(pageNumber, 10)) || extraction.pages[0];
   const pageText = targetPage ? targetPage.content : extraction.text.slice(0, 4000);
 
-  const prompt = `You are an expert exam setter. Generate a replacement Multiple Choice Question (MCQ) for an engineering examination based ONLY on the provided text from page ${pageNumber} of "${originalName}".
+  const prompt = `You are a senior engineering professor creating a replacement Multiple Choice Question (MCQ) from page ${pageNumber} of "${originalName}".
 
-DO NOT repeat this existing question: "${existingQuestion}"
+RULES:
+- If the page contains Question Bank prompts or syllabus topics without answers, read a topic/question on the page, solve the technical concept yourself, and write a real conceptual/technical MCQ testing that answer.
+- NEVER ask meta-questions about PDF structure (like "What is in Question 1?", "How many marks?", "Which module?", or "Which textbook?").
+- DO NOT repeat this existing question: "${existingQuestion}"
+
 TARGET TOPIC: ${topic || 'General'}
 TARGET DIFFICULTY: ${difficulty}
 QUESTION STYLE: ${questionStyle}
@@ -294,7 +306,7 @@ ${pageText.slice(0, 4000)}
 
 Return ONLY valid JSON matching this schema:
 {
-  "question": "Replacement question text?",
+  "question": "Clear technical engineering question testing the concept?",
   "options": [
     { "label": "A", "text": "Option A" },
     { "label": "B", "text": "Option B" },
@@ -302,7 +314,7 @@ Return ONLY valid JSON matching this schema:
     { "label": "D", "text": "Option D" }
   ],
   "correct_answer": "A",
-  "explanation": "Why this answer is correct citing page ${pageNumber}...",
+  "explanation": "Clear technical explanation of why this option is correct for page ${pageNumber}...",
   "source_page": ${pageNumber},
   "topic": "${topic || 'General'}",
   "difficulty": "${difficulty}"
