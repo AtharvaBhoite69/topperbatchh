@@ -551,14 +551,15 @@ router.get('/practice', requireApproved, async (req, res, next) => {
 router.get('/daily/history', requireApproved, async (req, res, next) => {
   try {
     const db = getDb();
+    await expireOldChallenges(db);
     const history = await db.prepare(`
       SELECT c.id, c.title, c.challenge_date, s.name as subject_name,
              qa.score, qa.total_correct, qa.time_taken_seconds, qa.submitted_at
       FROM mcq_challenges c
       LEFT JOIN subjects s ON c.subject_id = s.id
       LEFT JOIN quiz_attempts qa ON qa.challenge_id = c.id AND qa.user_id = ?
-      WHERE c.is_published = 1
-      ORDER BY c.challenge_date DESC
+      WHERE c.is_published = 1 AND c.is_active = 0
+      ORDER BY c.challenge_date DESC, c.created_at DESC
       LIMIT 20
     `).all(req.user.id);
     return res.status(200).json({ success: true, history });

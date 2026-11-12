@@ -399,7 +399,7 @@ router.post('/publish', async (req, res, next) => {
       `).run(
         challengeId,
         title,
-        `Daily MCQ battle from ${approvedQuestions[0]?.source_pdf || 'curated question bank'}. Test your concepts!`,
+        null,
         subjectId || null,
         targetDate,
         parseInt(durationMinutes, 10) || 15,

@@ -150,11 +150,12 @@ export const DailyChallenge = () => {
                 {challenge.title}
               </h2>
 
-              <p className="font-sans text-xs sm:text-sm text-vintage-olive font-medium leading-relaxed">
-                {(challenge.description &&
-                  challenge.description.replace(/AI-forged challenge/gi, 'Daily MCQ battle')) ||
-                  'Official daily battle generated from previous year papers. Timer begins immediately once you enter the arena.'}
-              </p>
+              {challenge.description &&
+                !/AI-forged|Daily MCQ battle from|from\s+\S+\.pdf/i.test(challenge.description) && (
+                  <p className="font-sans text-xs sm:text-sm text-vintage-olive font-medium leading-relaxed">
+                    {challenge.description}
+                  </p>
+                )}
 
               {/* Scoring Rules Breakdown */}
               <div className="comic-dashed-box grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-mono">
@@ -299,7 +300,7 @@ export const DailyChallenge = () => {
               <ComicCard key={h.id} accent="olive" className="bg-white p-4">
                 <div className="flex justify-between items-start mb-2">
                   <span className="font-mono text-[10px] text-ink/70">
-                    {h.challenge_date}
+                    {h.challenge_date ? String(h.challenge_date).split('T')[0] : ''}
                   </span>
                   {h.score !== null ? (
                     <span className="font-comic text-[11px] bg-victory-green text-cream px-1.5 py-0.5 rounded border border-ink">
