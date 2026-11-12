@@ -161,7 +161,7 @@ export const ManageStudents = () => {
                   </div>
 
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <h4 className="font-heading text-base uppercase text-ink">
                         {student.full_name}
                       </h4>
@@ -175,6 +175,16 @@ export const ManageStudents = () => {
                         }`}
                       >
                         {student.status.toUpperCase()}
+                      </span>
+                      <span
+                        className={`font-comic text-[9px] px-1.5 py-0.2 rounded border border-ink ${
+                          (student.screenshot_attempts || 0) > 0
+                            ? 'bg-punch-red text-cream'
+                            : 'bg-cream text-ink/70'
+                        }`}
+                        title="Detected screenshot attempts"
+                      >
+                        SCREENSHOTS: {student.screenshot_attempts || 0}
                       </span>
                     </div>
                     <div className="text-[11px] font-mono text-olive-dark">

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { X, Volume2, VolumeX, ShieldAlert, Sparkles } from 'lucide-react';
 import ComicButton from '../ui/ComicButton';
+import { profile as profileApi } from '../../services/api';
 
 /**
  * ScreenshotProtector & "Kya re bhik mangya!" Easter Egg Popup
@@ -16,6 +17,7 @@ export const ScreenshotProtector = ({ children }) => {
   const timerRef = useRef(null);
   const intervalRef = useRef(null);
   const userInteractedRef = useRef(false);
+  const lastReportedRef = useRef(0);
 
   // Play synthesized cartoon comedic sound using Web Audio API
   const playComedicSound = useCallback(() => {
@@ -71,7 +73,19 @@ export const ScreenshotProtector = ({ children }) => {
     }
   }, [soundEnabled]);
 
-  const triggerEasterEgg = useCallback(() => {
+  const triggerEasterEgg = useCallback((method = 'shortcut') => {
+    // Log attempt to backend for authenticated users (debounced 2s to avoid keydown+keyup double count)
+    const nowMs = Date.now();
+    if (nowMs - lastReportedRef.current > 2000 && localStorage.getItem('topperbatch_token')) {
+      lastReportedRef.current = nowMs;
+      profileApi
+        .reportScreenshotAttempt({
+          path: window.location.pathname,
+          method: typeof method === 'string' ? method : 'shortcut',
+        })
+        .catch(() => {});
+    }
+
     // Prevent stacking
     setIsOpen((alreadyOpen) => {
       if (alreadyOpen) return true;

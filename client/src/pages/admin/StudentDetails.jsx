@@ -41,7 +41,7 @@ export const StudentDetails = () => {
   if (loading) return <LoadingSkeleton count={3} />;
   if (!data?.student) return null;
 
-  const { student, attempts = [], sessions = [], auditLogs = [] } = data;
+  const { student, attempts = [], sessions = [], screenshotLogs = [] } = data;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 text-left select-none">
@@ -54,12 +54,21 @@ export const StudentDetails = () => {
       {/* Header Info */}
       <div className="comic-box bg-white p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="font-heading text-3xl uppercase tracking-wide text-ink">
               {student.full_name}
             </h1>
             <span className="font-comic text-xs bg-comic-yellow text-ink px-2 py-0.5 rounded border border-ink">
               {student.status.toUpperCase()}
+            </span>
+            <span
+              className={`font-comic text-xs px-2 py-0.5 rounded border border-ink ${
+                (student.screenshot_attempts || 0) > 0
+                  ? 'bg-punch-red text-cream'
+                  : 'bg-cream text-ink/80'
+              }`}
+            >
+              SCREENSHOT ATTEMPTS: {student.screenshot_attempts || 0}
             </span>
           </div>
           <div className="font-mono text-xs text-olive-dark mt-1">
@@ -97,6 +106,48 @@ export const StudentDetails = () => {
                 <span className="font-heading text-base text-ink">{a.score} PTS</span>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Screenshot Attempts Log */}
+      <div className="comic-box bg-white p-5">
+        <h3 className="font-heading text-lg uppercase text-ink mb-3 border-b-2 border-ink/20 pb-2 flex items-center justify-between">
+          <span>SCREENSHOT ATTEMPTS ({student.screenshot_attempts || 0})</span>
+          {(student.screenshot_attempts || 0) > 0 && (
+            <span className="font-comic text-[10px] bg-punch-red text-cream px-2 py-0.5 rounded border border-ink">
+              ALERT
+            </span>
+          )}
+        </h3>
+        {screenshotLogs.length === 0 ? (
+          <p className="text-xs text-olive-dark font-sans">No screenshot attempts detected for this student.</p>
+        ) : (
+          <div className="space-y-2">
+            {screenshotLogs.map((log) => {
+              let parsed = {};
+              try {
+                parsed = log.details ? JSON.parse(log.details) : {};
+              } catch (_) {}
+              return (
+                <div
+                  key={log.id}
+                  className="p-2.5 border border-punch-red/40 bg-punch-red/5 rounded text-xs font-mono flex justify-between items-center gap-2"
+                >
+                  <div>
+                    <div className="font-bold text-ink">
+                      Page: {parsed.path || 'Unknown'}
+                    </div>
+                    <div className="text-[10px] text-ink/70">
+                      Method: {parsed.method || 'detected'} {log.ip_address ? `• IP: ${log.ip_address}` : ''}
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-punch-red font-bold flex-shrink-0">
+                    {log.created_at ? new Date(log.created_at).toLocaleString() : ''}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

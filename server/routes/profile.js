@@ -205,4 +205,35 @@ router.get('/avatar-file/:filename', (req, res) => {
   }
 });
 
+/**
+ * POST /api/profile/screenshot-attempt
+ * Log a detected screenshot / screen-capture attempt by the authenticated user
+ */
+router.post('/screenshot-attempt', authenticate, async (req, res, next) => {
+  try {
+    const db = getDb();
+    const { path: pagePath = null, method = 'detected' } = req.body || {};
+
+    await db
+      .prepare(
+        `INSERT INTO audit_logs (id, admin_id, action, target_type, target_id, details, ip_address)
+         VALUES (?, ?, 'SCREENSHOT_ATTEMPT', 'user', ?, ?, ?)`
+      )
+      .run(
+        generateId(),
+        req.user.id,
+        req.user.id,
+        JSON.stringify({
+          path: typeof pagePath === 'string' ? pagePath.slice(0, 200) : null,
+          method: typeof method === 'string' ? method.slice(0, 60) : 'detected',
+        }),
+        req.ip || null
+      );
+
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

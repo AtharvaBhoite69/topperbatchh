@@ -301,14 +301,19 @@ router.get('/students', async (req, res, next) => {
     const total = countRow ? parseInt(countRow.total, 10) : 0;
 
     const studentsStmt = db.prepare(`
-      SELECT id, email, full_name, role, status, semester, department, total_points, study_streak, last_active_date, created_at
+      SELECT id, email, full_name, role, status, semester, department, total_points, study_streak, last_active_date, created_at,
+             (SELECT COUNT(*) FROM audit_logs al WHERE al.target_id = users.id AND al.action = 'SCREENSHOT_ATTEMPT') as screenshot_attempts
       FROM users
       WHERE ${whereClause}
       ORDER BY created_at DESC
       LIMIT ? OFFSET ?
     `);
 
-    const students = await studentsStmt.all(...params, l, o);
+    const rawStudents = await studentsStmt.all(...params, l, o);
+    const students = rawStudents.map((s) => ({
+      ...s,
+      screenshot_attempts: parseInt(s.screenshot_attempts || 0, 10),
+    }));
 
     return res.status(200).json({
       success: true,
@@ -363,12 +368,32 @@ router.get('/students/:id', async (req, res, next) => {
       LIMIT 10
     `).all(id, id);
 
+    const ssCountRow = await db.prepare(`
+      SELECT COUNT(*) as total
+      FROM audit_logs
+      WHERE target_id = ? AND action = 'SCREENSHOT_ATTEMPT'
+    `).get(id);
+
+    const screenshotLogs = await db.prepare(`
+      SELECT id, details, ip_address, created_at
+      FROM audit_logs
+      WHERE target_id = ? AND action = 'SCREENSHOT_ATTEMPT'
+      ORDER BY created_at DESC
+      LIMIT 20
+    `).all(id);
+
+    const sanitizedStudent = {
+      ...sanitizeUser(user),
+      screenshot_attempts: parseInt(ssCountRow?.total || 0, 10),
+    };
+
     return res.status(200).json({
       success: true,
-      student: sanitizeUser(user),
+      student: sanitizedStudent,
       attempts,
       sessions,
       auditLogs,
+      screenshotLogs,
     });
   } catch (err) {
     next(err);

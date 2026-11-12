@@ -175,6 +175,7 @@ export const profile = {
     api.post('/profile/avatar', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
+  reportScreenshotAttempt: (data) => api.post('/profile/screenshot-attempt', data),
 };
 
 export const notifications = {
