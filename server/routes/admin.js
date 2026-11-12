@@ -571,26 +571,52 @@ router.post('/announcements', async (req, res, next) => {
 
 /**
  * POST /api/admin/email-broadcast
- * Send a direct email update to registered users on their registered email IDs.
+ * Send a direct email update to registered users or a specific student.
  */
 router.post('/email-broadcast', async (req, res, next) => {
   try {
-    const { subject, title, message, audience = 'approved', offset = 0, limit = 0 } = req.body;
+    const {
+      subject,
+      title,
+      message,
+      audience = 'approved',
+      recipientId,
+      recipientEmail,
+      offset = 0,
+      limit = 0,
+    } = req.body;
     if (!subject?.trim() || !message?.trim()) {
       return res.status(400).json({ error: 'Email subject and message are required.' });
     }
 
     const db = getDb();
-    let whereClause = "status = 'approved'";
-    if (audience === 'all') {
-      whereClause = "status IN ('approved', 'pending')";
-    } else if (audience === 'pending') {
-      whereClause = "status = 'pending'";
-    }
+    let allRows = [];
 
-    const allRows = await db
-      .prepare(`SELECT email, full_name FROM users WHERE ${whereClause} ORDER BY created_at ASC`)
-      .all();
+    if (audience === 'single') {
+      if (!recipientId && !recipientEmail?.trim()) {
+        return res.status(400).json({ error: 'Please select a specific student to email.' });
+      }
+      const targetUser = recipientId
+        ? await db.prepare('SELECT id, email, full_name FROM users WHERE id = ?').get(recipientId)
+        : await db
+            .prepare('SELECT id, email, full_name FROM users WHERE LOWER(email) = LOWER(?)')
+            .get(recipientEmail.trim());
+      if (!targetUser) {
+        return res.status(404).json({ error: 'Selected student not found.' });
+      }
+      allRows = [targetUser];
+    } else {
+      let whereClause = "status = 'approved'";
+      if (audience === 'all') {
+        whereClause = "status IN ('approved', 'pending')";
+      } else if (audience === 'pending') {
+        whereClause = "status = 'pending'";
+      }
+
+      allRows = await db
+        .prepare(`SELECT email, full_name FROM users WHERE ${whereClause} ORDER BY created_at ASC`)
+        .all();
+    }
 
     const start = Math.max(0, parseInt(offset, 10) || 0);
     const batchSize = parseInt(limit, 10) || 0;
@@ -638,7 +664,10 @@ router.post('/email-broadcast', async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      message: `Update emailed to ${result.sentCount} registered user(s)!`,
+      message:
+        audience === 'single'
+          ? `Personal email sent to ${allRows[0].full_name} (${allRows[0].email})!`
+          : `Update emailed to ${result.sentCount} registered user(s)!`,
       result: {
         ...result,
         totalAudience: allRows.length,

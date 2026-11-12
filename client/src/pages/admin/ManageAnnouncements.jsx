@@ -25,12 +25,30 @@ export const ManageAnnouncements = () => {
   const [emailSubject, setEmailSubject] = useState('');
   const [emailMessage, setEmailMessage] = useState('');
   const [emailAudience, setEmailAudience] = useState('approved');
+  const [studentsList, setStudentsList] = useState([]);
+  const [studentSearch, setStudentSearch] = useState('');
+  const [selectedStudentId, setSelectedStudentId] = useState('');
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailProgress, setEmailProgress] = useState('');
 
   useEffect(() => {
     fetchAnnouncements();
   }, []);
+
+  useEffect(() => {
+    if (showEmailModal && emailAudience === 'single' && studentsList.length === 0) {
+      adminApi
+        .getStudents({ limit: 500, status: 'all' })
+        .then((res) => {
+          if (res.data?.success) {
+            setStudentsList(res.data.students || []);
+          }
+        })
+        .catch(() => {
+          toast.error('Failed to load student list.');
+        });
+    }
+  }, [showEmailModal, emailAudience, studentsList.length]);
 
   const fetchAnnouncements = async () => {
     setLoading(true);
@@ -77,6 +95,10 @@ export const ManageAnnouncements = () => {
   const handleSendEmailBroadcast = async (e) => {
     e.preventDefault();
     if (!emailSubject.trim() || !emailMessage.trim()) return;
+    if (emailAudience === 'single' && !selectedStudentId) {
+      toast.error('Please select a student to send personal email.');
+      return;
+    }
 
     setSendingEmail(true);
     setEmailProgress('Starting...');
@@ -86,6 +108,7 @@ export const ManageAnnouncements = () => {
       let totalSent = 0;
       let totalAudience = 0;
       let hasMore = true;
+      let serverMessage = '';
 
       while (hasMore) {
         const res = await adminApi.sendEmailBroadcast({
@@ -93,6 +116,7 @@ export const ManageAnnouncements = () => {
           title: emailSubject.trim(),
           message: emailMessage.trim(),
           audience: emailAudience,
+          recipientId: emailAudience === 'single' ? selectedStudentId : undefined,
           offset,
           limit: 10,
         });
@@ -102,6 +126,7 @@ export const ManageAnnouncements = () => {
           throw new Error(res.data?.error || 'Could not send email update.');
         }
 
+        serverMessage = res.data?.message || serverMessage;
         totalSent += result.sentCount || 0;
         totalAudience = result.totalAudience || totalSent;
         hasMore = Boolean(result.hasMore);
@@ -114,10 +139,16 @@ export const ManageAnnouncements = () => {
         }
       }
 
-      toast.success(`Update emailed to ${totalSent} registered user(s)!`);
+      toast.success(
+        emailAudience === 'single'
+          ? serverMessage || 'Personal email sent!'
+          : `Update emailed to ${totalSent} registered user(s)!`
+      );
       setShowEmailModal(false);
       setEmailSubject('');
       setEmailMessage('');
+      setSelectedStudentId('');
+      setStudentSearch('');
     } catch (err) {
       toast.error(err.response?.data?.error || err.message || 'Could not send email update.');
     } finally {
@@ -330,8 +361,46 @@ export const ManageAnnouncements = () => {
                   <option value="approved">Approved Students Only</option>
                   <option value="all">All Registered Users (Approved + Pending)</option>
                   <option value="pending">Pending Approval Users Only</option>
+                  <option value="single">Specific Student (Personal Mail)</option>
                 </select>
               </div>
+
+              {emailAudience === 'single' && (
+                <div className="space-y-2 p-3 bg-white border-2 border-ink rounded-lg">
+                  <label className="font-comic text-xs uppercase text-ink block">
+                    SELECT SPECIFIC STUDENT
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Filter by student name or email..."
+                    value={studentSearch}
+                    onChange={(e) => setStudentSearch(e.target.value)}
+                    className="comic-input text-xs py-1.5 bg-cream"
+                  />
+                  <select
+                    value={selectedStudentId}
+                    onChange={(e) => setSelectedStudentId(e.target.value)}
+                    className="comic-input text-xs py-2 bg-white"
+                    required
+                  >
+                    <option value="">-- Choose a student --</option>
+                    {studentsList
+                      .filter((s) => {
+                        const q = studentSearch.trim().toLowerCase();
+                        if (!q) return true;
+                        return (
+                          (s.full_name || '').toLowerCase().includes(q) ||
+                          (s.email || '').toLowerCase().includes(q)
+                        );
+                      })
+                      .map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.full_name} ({s.email}) [{s.status}]
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
 
               <ComicInput
                 label="Email Subject"

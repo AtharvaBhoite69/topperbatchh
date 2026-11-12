@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import ComicButton from '../../components/ui/ComicButton';
 import ComicCard from '../../components/ui/ComicCard';
+import ComicInput from '../../components/ui/ComicInput';
 import { EmptyState, LoadingSkeleton } from '../../components/ui/ComicElements';
 import { admin as adminApi } from '../../services/api';
-import { Users, Search, Shield, Ban, CheckCircle, Eye } from 'lucide-react';
+import { Users, Search, Shield, Ban, CheckCircle, Eye, Mail, Send } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const ManageStudents = () => {
@@ -14,6 +15,38 @@ export const ManageStudents = () => {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+
+  // Personal Email modal state
+  const [emailTarget, setEmailTarget] = useState(null);
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailMessage, setEmailMessage] = useState('');
+  const [sendingEmail, setSendingEmail] = useState(false);
+
+  const handleSendPersonalEmail = async (e) => {
+    e.preventDefault();
+    if (!emailTarget || !emailSubject.trim() || !emailMessage.trim()) return;
+
+    setSendingEmail(true);
+    try {
+      const res = await adminApi.sendEmailBroadcast({
+        audience: 'single',
+        recipientId: emailTarget.id,
+        subject: emailSubject.trim(),
+        title: emailSubject.trim(),
+        message: emailMessage.trim(),
+      });
+      if (res.data?.success) {
+        toast.success(res.data.message || `Personal email sent to ${emailTarget.full_name}!`);
+        setEmailTarget(null);
+        setEmailSubject('');
+        setEmailMessage('');
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Could not send personal email.');
+    } finally {
+      setSendingEmail(false);
+    }
+  };
 
   useEffect(() => {
     fetchStudents();
@@ -151,6 +184,15 @@ export const ManageStudents = () => {
                 </div>
 
                 <div className="flex items-center gap-2 self-end sm:self-center">
+                  <ComicButton
+                    variant="yellow"
+                    size="sm"
+                    icon={<Mail className="w-3.5 h-3.5" />}
+                    onClick={() => setEmailTarget(student)}
+                  >
+                    EMAIL
+                  </ComicButton>
+
                   <Link to={`/admin/students/${student.id}`}>
                     <ComicButton variant="white" size="sm" icon={<Eye className="w-3.5 h-3.5" />}>
                       DETAILS
@@ -194,6 +236,66 @@ export const ManageStudents = () => {
           >
             NEXT
           </ComicButton>
+        </div>
+      )}
+
+      {/* Personal Email Modal */}
+      {emailTarget && (
+        <div className="fixed inset-0 z-50 bg-ink/70 flex items-center justify-center p-4">
+          <div className="comic-box-lg max-w-lg w-full bg-cream p-6 animate-in fade-in max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center gap-2 mb-1">
+              <Mail className="w-5 h-5 text-punch-red" />
+              <h3 className="font-heading text-2xl uppercase tracking-wide text-ink">
+                PERSONAL EMAIL TO STUDENT
+              </h3>
+            </div>
+            <p className="font-mono text-xs text-olive-dark mb-4">
+              To: <strong className="text-ink">{emailTarget.full_name}</strong> ({emailTarget.email})
+            </p>
+
+            <form onSubmit={handleSendPersonalEmail} className="space-y-4">
+              <ComicInput
+                label="Email Subject"
+                placeholder="e.g. Important update regarding your progress"
+                value={emailSubject}
+                onChange={(e) => setEmailSubject(e.target.value)}
+                required
+              />
+
+              <ComicInput
+                label="Personal Message"
+                textarea={true}
+                rows={5}
+                placeholder={`Write a personal message for ${emailTarget.full_name}...`}
+                value={emailMessage}
+                onChange={(e) => setEmailMessage(e.target.value)}
+                required
+              />
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEmailTarget(null);
+                    setEmailSubject('');
+                    setEmailMessage('');
+                  }}
+                  className="comic-btn comic-btn-white text-xs"
+                >
+                  CANCEL
+                </button>
+                <ComicButton
+                  type="submit"
+                  variant="yellow"
+                  size="sm"
+                  loading={sendingEmail}
+                  icon={<Send className="w-3.5 h-3.5" />}
+                >
+                  SEND PERSONAL EMAIL
+                </ComicButton>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>
