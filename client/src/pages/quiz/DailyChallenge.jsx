@@ -151,7 +151,8 @@ export const DailyChallenge = () => {
               </h2>
 
               <p className="font-sans text-xs sm:text-sm text-vintage-olive font-medium leading-relaxed">
-                {challenge.description ||
+                {(challenge.description &&
+                  challenge.description.replace(/AI-forged challenge/gi, 'Daily MCQ battle')) ||
                   'Official daily battle generated from previous year papers. Timer begins immediately once you enter the arena.'}
               </p>
 
@@ -171,7 +172,7 @@ export const DailyChallenge = () => {
                 </div>
               </div>
 
-              {/* Live Animated Quiz End Countdown (5:30 PM IST) */}
+              {/* Live Animated Quiz End Countdown */}
               {countdown && (
                 <div
                   className={`comic-box p-3 sm:p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 transition-colors duration-300 ${
@@ -185,12 +186,12 @@ export const DailyChallenge = () => {
                     </span>
                     <div>
                       <div className="font-comic text-[11px] uppercase font-bold text-punch-red tracking-wide">
-                        TODAY&apos;S QUIZ CLOSES AT 5:30 PM IST
+                        QUIZ CLOSES IN
                       </div>
                       <div className="font-sans text-[11px] text-olive-dark font-medium">
                         {countdown.isUrgent
                           ? 'Hurry! Less than 15 minutes remaining to submit.'
-                          : 'Complete your attempt before the daily cutoff timer hits zero.'}
+                          : 'Complete your attempt before the countdown hits zero.'}
                       </div>
                     </div>
                   </div>
