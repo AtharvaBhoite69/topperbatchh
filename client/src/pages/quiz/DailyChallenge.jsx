@@ -98,7 +98,7 @@ export const DailyChallenge = () => {
 
           <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
             <div className="space-y-3 max-w-xl">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <ComicBadge variant="yellow">
                   {challenge.subject_name || 'All-Subject Mixed'}
                 </ComicBadge>
@@ -108,6 +108,16 @@ export const DailyChallenge = () => {
                 <span className="font-mono text-xs bg-white px-2 py-0.5 border border-ink rounded flex items-center gap-1">
                   <Clock className="w-3.5 h-3.5" /> {challenge.duration_minutes || 15} MINS
                 </span>
+                {challenge.expires_at && (() => {
+                  const msLeft = Math.max(0, new Date(challenge.expires_at).getTime() - Date.now());
+                  const hrs = Math.floor(msLeft / (1000 * 60 * 60));
+                  const mins = Math.floor((msLeft % (1000 * 60 * 60)) / (1000 * 60));
+                  return (
+                    <span className="font-mono text-xs bg-punch-red/10 text-punch-red px-2 py-0.5 border border-punch-red rounded font-bold">
+                      CLOSES IN {hrs}H {mins}M
+                    </span>
+                  );
+                })()}
               </div>
 
               <h2 className="font-heading text-3xl sm:text-4xl uppercase tracking-tight text-ink">

@@ -16,24 +16,53 @@ router.use(authenticate);
 // Student Challenge & Quiz Routes
 // =============================================================================
 
+function formatSqlUtc(date) {
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function parseUtcTimestamp(ts) {
+  if (!ts) return null;
+  if (ts instanceof Date) return ts;
+  const str = String(ts).trim();
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(str)) {
+    return new Date(str.replace(' ', 'T') + 'Z');
+  }
+  const parsed = new Date(str);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isChallengeExpired(challenge, now = new Date()) {
+  const createdAt = parseUtcTimestamp(challenge?.created_at);
+  if (!createdAt) return false;
+  return now.getTime() - createdAt.getTime() >= 24 * 60 * 60 * 1000;
+}
+
+async function expireOldChallenges(db) {
+  const cutoff24h = formatSqlUtc(new Date(Date.now() - 24 * 60 * 60 * 1000));
+  await db.prepare('UPDATE mcq_challenges SET is_active = 0 WHERE is_active = 1 AND created_at < ?').run(cutoff24h);
+  return cutoff24h;
+}
+
 /**
  * GET /api/quiz/daily
  * Get today's active challenge with sanitized questions (no correct flags)
+ * Challenges automatically complete 24 hours after uploading.
  */
 router.get('/daily', requireApproved, async (req, res, next) => {
   try {
     const db = getDb();
     const today = new Date().toISOString().split('T')[0];
+    const cutoff24h = await expireOldChallenges(db);
 
-    // Find active challenge for today or most recent active challenge
+    // Find active challenge uploaded within the last 24 hours
     let challenge = await db.prepare(`
       SELECT c.*, s.name as subject_name
       FROM mcq_challenges c
       LEFT JOIN subjects s ON c.subject_id = s.id
-      WHERE c.is_active = 1 AND (c.challenge_date = ? OR c.challenge_date <= ?)
-      ORDER BY c.challenge_date DESC
+      WHERE c.is_active = 1 AND c.created_at >= ? AND c.challenge_date <= ?
+      ORDER BY c.created_at DESC
       LIMIT 1
-    `).get(today, today);
+    `).get(cutoff24h, today);
 
     if (!challenge) {
       return res.status(200).json({
@@ -70,6 +99,9 @@ router.get('/daily', requireApproved, async (req, res, next) => {
       questionsWithOptions.push({ ...q, options });
     }
 
+    const createdAt = parseUtcTimestamp(challenge.created_at);
+    const expiresAt = createdAt ? new Date(createdAt.getTime() + 24 * 60 * 60 * 1000).toISOString() : null;
+
     return res.status(200).json({
       success: true,
       challenge: {
@@ -81,6 +113,7 @@ router.get('/daily', requireApproved, async (req, res, next) => {
         scoring_correct: challenge.scoring_correct,
         participation_bonus: challenge.participation_bonus,
         total_questions: questions.length,
+        expires_at: expiresAt,
       },
       userAttempt: userAttempt || null,
       questions: userAttempt && userAttempt.is_submitted ? [] : questionsWithOptions,
@@ -113,10 +146,14 @@ async function handleStartAttempt(req, res, next) {
 
     const db = getDb();
 
-    // Verify challenge exists and is active
+    // Verify challenge exists, is active, and is within its 24-hour window
     const challenge = await db.prepare('SELECT * FROM mcq_challenges WHERE id = ? AND is_active = 1').get(challenge_id);
     if (!challenge) {
       return res.status(404).json({ error: 'Competition not found or is currently closed.' });
+    }
+    if (isChallengeExpired(challenge)) {
+      await db.prepare('UPDATE mcq_challenges SET is_active = 0 WHERE id = ?').run(challenge.id);
+      return res.status(400).json({ error: 'This daily quiz has been completed (24-hour window ended).' });
     }
 
     // Check existing attempt
@@ -663,6 +700,7 @@ router.post('/challenges', requireAdmin, async (req, res, next) => {
 router.get('/challenges', requireAdmin, async (req, res, next) => {
   try {
     const db = getDb();
+    await expireOldChallenges(db);
     const challenges = await db.prepare(`
       SELECT c.*, s.name as subject_name,
              (SELECT COUNT(*) FROM questions WHERE challenge_id = c.id) as question_count,
