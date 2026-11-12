@@ -16,6 +16,8 @@ router.use(authenticate);
 // Student Challenge & Quiz Routes
 // =============================================================================
 
+const IST_OFFSET_MS = 330 * 60 * 1000;
+
 function formatSqlUtc(date) {
   return date.toISOString().slice(0, 19).replace('T', ' ');
 }
@@ -31,30 +33,67 @@ function parseUtcTimestamp(ts) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function isChallengeExpired(challenge, now = new Date()) {
+/**
+ * Compute the 5:30 PM IST deadline for a challenge based on when it was uploaded.
+ * - Uploaded before 5:30 PM IST -> ends at 5:30 PM IST that same day.
+ * - Uploaded at/after 5:30 PM IST -> ends at 5:30 PM IST the next day.
+ */
+function getChallengeExpiresAt(challenge) {
   const createdAt = parseUtcTimestamp(challenge?.created_at);
-  if (!createdAt) return false;
-  return now.getTime() - createdAt.getTime() >= 24 * 60 * 60 * 1000;
+  if (!createdAt) return null;
+  const istCreated = new Date(createdAt.getTime() + IST_OFFSET_MS);
+  const istMinutes = istCreated.getUTCHours() * 60 + istCreated.getUTCMinutes();
+  const dayOffset = istMinutes >= 17 * 60 + 30 ? 1 : 0;
+  const expiresIstMs = Date.UTC(
+    istCreated.getUTCFullYear(),
+    istCreated.getUTCMonth(),
+    istCreated.getUTCDate() + dayOffset,
+    17, 30, 0, 0
+  );
+  return new Date(expiresIstMs - IST_OFFSET_MS);
+}
+
+function isChallengeExpired(challenge, now = new Date()) {
+  const expiresAt = getChallengeExpiresAt(challenge);
+  if (!expiresAt) return false;
+  return now.getTime() >= expiresAt.getTime();
+}
+
+/**
+ * Most recent 5:30 PM IST boundary in UTC.
+ * Any challenge created before this boundary has already passed its 5:30 PM IST end time.
+ */
+function getLast530PmIstUtc(now = new Date()) {
+  const istNow = new Date(now.getTime() + IST_OFFSET_MS);
+  const istMinutes = istNow.getUTCHours() * 60 + istNow.getUTCMinutes();
+  const dayOffset = istMinutes >= 17 * 60 + 30 ? 0 : -1;
+  const cutoffIstMs = Date.UTC(
+    istNow.getUTCFullYear(),
+    istNow.getUTCMonth(),
+    istNow.getUTCDate() + dayOffset,
+    17, 30, 0, 0
+  );
+  return new Date(cutoffIstMs - IST_OFFSET_MS);
 }
 
 async function expireOldChallenges(db) {
-  const cutoff24h = formatSqlUtc(new Date(Date.now() - 24 * 60 * 60 * 1000));
-  await db.prepare('UPDATE mcq_challenges SET is_active = 0 WHERE is_active = 1 AND created_at < ?').run(cutoff24h);
-  return cutoff24h;
+  const cutoff530Pm = formatSqlUtc(getLast530PmIstUtc());
+  await db.prepare('UPDATE mcq_challenges SET is_active = 0 WHERE is_active = 1 AND created_at < ?').run(cutoff530Pm);
+  return cutoff530Pm;
 }
 
 /**
  * GET /api/quiz/daily
  * Get today's active challenge with sanitized questions (no correct flags)
- * Challenges automatically complete 24 hours after uploading.
+ * Challenges automatically complete at 5:30 PM IST.
  */
 router.get('/daily', requireApproved, async (req, res, next) => {
   try {
     const db = getDb();
     const today = new Date().toISOString().split('T')[0];
-    const cutoff24h = await expireOldChallenges(db);
+    const cutoff530Pm = await expireOldChallenges(db);
 
-    // Find active challenge uploaded within the last 24 hours
+    // Find active challenge for the current 5:30 PM IST cycle
     let challenge = await db.prepare(`
       SELECT c.*, s.name as subject_name
       FROM mcq_challenges c
@@ -62,7 +101,7 @@ router.get('/daily', requireApproved, async (req, res, next) => {
       WHERE c.is_active = 1 AND c.created_at >= ? AND c.challenge_date <= ?
       ORDER BY c.created_at DESC
       LIMIT 1
-    `).get(cutoff24h, today);
+    `).get(cutoff530Pm, today);
 
     if (!challenge) {
       return res.status(200).json({
@@ -99,8 +138,8 @@ router.get('/daily', requireApproved, async (req, res, next) => {
       questionsWithOptions.push({ ...q, options });
     }
 
-    const createdAt = parseUtcTimestamp(challenge.created_at);
-    const expiresAt = createdAt ? new Date(createdAt.getTime() + 24 * 60 * 60 * 1000).toISOString() : null;
+    const expiresAtDate = getChallengeExpiresAt(challenge);
+    const expiresAt = expiresAtDate ? expiresAtDate.toISOString() : null;
 
     return res.status(200).json({
       success: true,
@@ -153,7 +192,7 @@ async function handleStartAttempt(req, res, next) {
     }
     if (isChallengeExpired(challenge)) {
       await db.prepare('UPDATE mcq_challenges SET is_active = 0 WHERE id = ?').run(challenge.id);
-      return res.status(400).json({ error: 'This daily quiz has been completed (24-hour window ended).' });
+      return res.status(400).json({ error: 'This daily quiz has ended (5:30 PM IST deadline reached).' });
     }
 
     // Check existing attempt

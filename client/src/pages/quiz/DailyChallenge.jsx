@@ -7,36 +7,72 @@ import { quiz as quizApi } from '../../services/api';
 import { Zap, Clock, Trophy, Award, CheckCircle2, ArrowRight, Play, BookOpen } from 'lucide-react';
 import toast from 'react-hot-toast';
 
+function getCountdownParts(expiresAt) {
+  if (!expiresAt) return null;
+  const totalMs = Math.max(0, new Date(expiresAt).getTime() - Date.now());
+  const totalSeconds = Math.floor(totalMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return {
+    totalMs,
+    hours: String(hours).padStart(2, '0'),
+    minutes: String(minutes).padStart(2, '0'),
+    seconds: String(seconds).padStart(2, '0'),
+    isUrgent: totalMs > 0 && totalMs < 15 * 60 * 1000,
+    expired: totalMs === 0,
+  };
+}
+
 export const DailyChallenge = () => {
   const navigate = useNavigate();
   const [dailyData, setDailyData] = useState(null);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
+  const [countdown, setCountdown] = useState(null);
+
+  const fetchDaily = async () => {
+    try {
+      const [dailyRes, histRes] = await Promise.all([
+        quizApi.getDaily(),
+        quizApi.getDailyHistory(),
+      ]);
+
+      if (dailyRes.data?.success) {
+        setDailyData(dailyRes.data);
+        setCountdown(getCountdownParts(dailyRes.data?.challenge?.expires_at));
+      }
+      if (histRes.data?.success) {
+        setHistory(histRes.data.history || []);
+      }
+    } catch (err) {
+      toast.error('Failed to load challenge details.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchDaily = async () => {
-      try {
-        const [dailyRes, histRes] = await Promise.all([
-          quizApi.getDaily(),
-          quizApi.getDailyHistory(),
-        ]);
-
-        if (dailyRes.data?.success) {
-          setDailyData(dailyRes.data);
-        }
-        if (histRes.data?.success) {
-          setHistory(histRes.data.history || []);
-        }
-      } catch (err) {
-        toast.error('Failed to load challenge details.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchDaily();
   }, []);
+
+  useEffect(() => {
+    const expiresAt = dailyData?.challenge?.expires_at;
+    if (!expiresAt) return undefined;
+
+    setCountdown(getCountdownParts(expiresAt));
+    const timer = setInterval(() => {
+      const next = getCountdownParts(expiresAt);
+      setCountdown(next);
+      if (next?.expired) {
+        clearInterval(timer);
+        fetchDaily();
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [dailyData?.challenge?.expires_at]);
 
   const handleStartChallenge = async () => {
     if (!dailyData?.challenge) return;
@@ -108,16 +144,6 @@ export const DailyChallenge = () => {
                 <span className="font-mono text-xs bg-white px-2 py-0.5 border border-ink rounded flex items-center gap-1">
                   <Clock className="w-3.5 h-3.5" /> {challenge.duration_minutes || 15} MINS
                 </span>
-                {challenge.expires_at && (() => {
-                  const msLeft = Math.max(0, new Date(challenge.expires_at).getTime() - Date.now());
-                  const hrs = Math.floor(msLeft / (1000 * 60 * 60));
-                  const mins = Math.floor((msLeft % (1000 * 60 * 60)) / (1000 * 60));
-                  return (
-                    <span className="font-mono text-xs bg-punch-red/10 text-punch-red px-2 py-0.5 border border-punch-red rounded font-bold">
-                      CLOSES IN {hrs}H {mins}M
-                    </span>
-                  );
-                })()}
               </div>
 
               <h2 className="font-heading text-3xl sm:text-4xl uppercase tracking-tight text-ink">
@@ -144,6 +170,61 @@ export const DailyChallenge = () => {
                   <strong className="text-punch-red font-heading text-base">+{challenge.participation_bonus} PTS</strong>
                 </div>
               </div>
+
+              {/* Live Animated Quiz End Countdown (5:30 PM IST) */}
+              {countdown && (
+                <div
+                  className={`comic-box p-3 sm:p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 transition-colors duration-300 ${
+                    countdown.isUrgent ? 'bg-punch-red/15 border-punch-red' : 'bg-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="relative flex h-3 w-3 flex-shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-punch-red opacity-75" />
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-punch-red border border-ink" />
+                    </span>
+                    <div>
+                      <div className="font-comic text-[11px] uppercase font-bold text-punch-red tracking-wide">
+                        TODAY&apos;S QUIZ CLOSES AT 5:30 PM IST
+                      </div>
+                      <div className="font-sans text-[11px] text-olive-dark font-medium">
+                        {countdown.isUrgent
+                          ? 'Hurry! Less than 15 minutes remaining to submit.'
+                          : 'Complete your attempt before the daily cutoff timer hits zero.'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={`flex items-center gap-1.5 font-heading ${countdown.isUrgent ? 'animate-pulse' : ''}`}>
+                    {[
+                      { value: countdown.hours, label: 'HRS' },
+                      { value: countdown.minutes, label: 'MIN' },
+                      { value: countdown.seconds, label: 'SEC', isSec: true },
+                    ].map((unit, idx) => (
+                      <React.Fragment key={unit.label}>
+                        {idx > 0 && (
+                          <span className="font-heading text-xl text-ink animate-pulse">:</span>
+                        )}
+                        <div className="flex flex-col items-center">
+                          <div
+                            key={unit.isSec ? `${unit.label}-${unit.value}` : unit.label}
+                            className={`min-w-[44px] px-2 py-1 rounded border-2 border-ink shadow-[2px_2px_0px_#171510] text-center text-lg sm:text-xl leading-none transition-transform duration-200 ${
+                              unit.isSec
+                                ? 'bg-comic-yellow text-ink scale-[1.03]'
+                                : 'bg-ink text-cream'
+                            }`}
+                          >
+                            {unit.value}
+                          </div>
+                          <span className="font-mono text-[9px] text-olive-dark font-bold mt-1">
+                            {unit.label}
+                          </span>
+                        </div>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Action Box */}
