@@ -338,8 +338,44 @@ async function handleGetResults(req, res, next) {
 }
 
 /**
+ * Compute UTC bounds ('YYYY-MM-DD HH:MM:SS') for IST (+05:30) leaderboard windows.
+ * - daily: 5:00 PM IST to 5:00 PM IST
+ * - weekly: Monday 00:00:00 IST to Sunday 23:59:59 IST (exclusive next Monday 00:00:00 IST)
+ */
+function getIstLeaderboardWindow(type, now = new Date()) {
+  const IST_OFFSET_MS = 330 * 60 * 1000;
+  const istNow = new Date(now.getTime() + IST_OFFSET_MS);
+  const formatSqlUtc = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
+
+  if (type === 'daily') {
+    const dayOffset = istNow.getUTCHours() >= 17 ? 0 : -1;
+    const startIstMs = Date.UTC(
+      istNow.getUTCFullYear(),
+      istNow.getUTCMonth(),
+      istNow.getUTCDate() + dayOffset,
+      17, 0, 0, 0
+    );
+    const startUtc = new Date(startIstMs - IST_OFFSET_MS);
+    const endUtc = new Date(startIstMs + 24 * 60 * 60 * 1000 - IST_OFFSET_MS);
+    return { start: formatSqlUtc(startUtc), end: formatSqlUtc(endUtc) };
+  }
+
+  // weekly: Monday 00:00:00 IST to Sunday 23:59:59.999 IST
+  const daysSinceMonday = (istNow.getUTCDay() + 6) % 7;
+  const startIstMs = Date.UTC(
+    istNow.getUTCFullYear(),
+    istNow.getUTCMonth(),
+    istNow.getUTCDate() - daysSinceMonday,
+    0, 0, 0, 0
+  );
+  const startUtc = new Date(startIstMs - IST_OFFSET_MS);
+  const endUtc = new Date(startIstMs + 7 * 24 * 60 * 60 * 1000 - IST_OFFSET_MS);
+  return { start: formatSqlUtc(startUtc), end: formatSqlUtc(endUtc) };
+}
+
+/**
  * GET /api/quiz/leaderboard
- * Rankings: Daily, Weekly, or All-Time
+ * Rankings: Daily (5 PM - 5 PM IST), Weekly (Mon - Sun IST), or All-Time
  */
 router.get('/leaderboard', requireApproved, async (req, res, next) => {
   try {
@@ -349,17 +385,8 @@ router.get('/leaderboard', requireApproved, async (req, res, next) => {
     let query = '';
     let params = [];
 
-    if (type === 'daily') {
-      query = `
-        SELECT u.id as user_id, u.full_name, u.avatar_url, u.department, u.semester,
-               qa.score, qa.time_taken_seconds, qa.total_correct, qa.submitted_at
-        FROM quiz_attempts qa
-        JOIN users u ON qa.user_id = u.id
-        WHERE qa.is_submitted = 1 AND date(qa.submitted_at) = date('now')
-        ORDER BY qa.score DESC, qa.time_taken_seconds ASC
-        LIMIT 50
-      `;
-    } else if (type === 'weekly') {
+    if (type === 'daily' || type === 'weekly') {
+      const { start, end } = getIstLeaderboardWindow(type);
       query = `
         SELECT u.id as user_id, u.full_name, u.avatar_url, u.department, u.semester,
                SUM(qa.score) as score,
@@ -367,13 +394,16 @@ router.get('/leaderboard', requireApproved, async (req, res, next) => {
                SUM(qa.total_correct) as total_correct
         FROM quiz_attempts qa
         JOIN users u ON qa.user_id = u.id
-        WHERE qa.is_submitted = 1 AND qa.submitted_at >= datetime('now', '-7 days')
+        WHERE qa.is_submitted = 1
+          AND qa.submitted_at >= ?
+          AND qa.submitted_at < ?
         GROUP BY u.id, u.full_name, u.avatar_url, u.department, u.semester
         ORDER BY score DESC, time_taken_seconds ASC
         LIMIT 50
       `;
+      params = [start, end];
     } else {
-      // All-Time Leaderboard
+      // All-Time Leaderboard (preserved unchanged)
       query = `
         SELECT u.id as user_id, u.full_name, u.avatar_url, u.department, u.semester,
                u.total_points as score, u.study_streak,

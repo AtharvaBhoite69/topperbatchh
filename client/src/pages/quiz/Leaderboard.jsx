@@ -44,8 +44,10 @@ export const Leaderboard = () => {
             </h1>
           </div>
           <p className="font-sans text-xs text-olive-dark font-medium max-w-xl">
-            Ranked by total challenge score with completion time as tiebreaker.
-            Reach the top 3 podium for ultimate bragging rights and exclusive badge perks.
+            Ranked by total challenge score with completion time as tiebreaker.{' '}
+            {type === 'daily' && 'Daily window runs 5:00 PM to 5:00 PM IST.'}
+            {type === 'weekly' && 'Weekly window runs Monday to Sunday IST.'}
+            {type === 'alltime' && 'All-time overall batch rankings.'}
           </p>
         </div>
 
