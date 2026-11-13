@@ -60,30 +60,73 @@ export const Landing = () => {
           </Link>
         </div>
 
-        {/* Reference-style Presale Progress Card */}
-        <div className="mt-12 w-full max-w-xl comic-box p-6 bg-white relative">
-          <div className="absolute -top-3.5 right-4 bg-punch-red text-cream font-comic text-xs uppercase px-3 py-0.5 rounded border-2 border-ink shadow-[2px_2px_0px_#171510] -rotate-2">
-            BATCH CAPACITY
+        {/* The Batchbook Era Card */}
+        <div className="mt-12 w-full max-w-xl comic-box p-5 sm:p-6 bg-white relative overflow-hidden group">
+          {/* Badge Ribbon */}
+          <div className="absolute -top-3.5 right-4 bg-comic-yellow text-ink font-comic text-xs uppercase px-3 py-0.5 rounded border-2 border-ink shadow-[2px_2px_0px_#171510] -rotate-2 font-black flex items-center gap-1">
+            <Flame className="w-3.5 h-3.5 text-punch-red fill-punch-red animate-bounce" />
+            THE BATCHBOOK ERA
           </div>
 
-          <div className="flex justify-between items-center mb-2">
-            <span className="font-comic text-sm uppercase text-ink">APPROVED STUDENT SEATS</span>
-            <span className="font-heading text-sm text-punch-red">88% FILLED!</span>
-          </div>
+          <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-5">
+            {/* The Meme Photo with Comic Polaroid Frame & Animation */}
+            <div className="relative flex-shrink-0">
+              <div className="w-32 h-32 sm:w-36 sm:h-36 rounded-lg border-[3px] border-ink shadow-[4px_4px_0px_#171510] overflow-hidden bg-cream relative">
+                <img
+                  src="/batchbook-era.jpg"
+                  alt="The Batchbook Era"
+                  className="w-full h-full object-cover object-center transition-transform duration-500 ease-out group-hover:scale-110 group-hover:rotate-1"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-ink/50 via-transparent to-transparent opacity-60" />
+                <span className="absolute bottom-1.5 left-2 font-mono text-[9px] font-bold text-cream tracking-wider uppercase drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
+                  ⚡ 2004 VIBES
+                </span>
+              </div>
+              {/* Retro Comic Pin Sticker */}
+              <div className="absolute -bottom-2 -right-2 bg-punch-red text-cream font-comic text-[10px] uppercase font-bold px-2 py-0.5 rounded border border-ink shadow-[2px_2px_0px_#171510] rotate-3 animate-pulse">
+                LOCKED IN 🎧
+              </div>
+            </div>
 
-          {/* Halftone Progress bar */}
-          <div className="w-full h-6 bg-cream border-[3px] border-ink rounded-full p-0.5 overflow-hidden shadow-[2px_2px_0px_#171510]">
-            <div
-              className="h-full bg-punch-red rounded-full comic-halftone-light flex items-center justify-center text-[10px] font-comic text-cream font-bold"
-              style={{ width: '88%' }}
-            >
-              88% APPROVED
+            {/* Retro Copy and Animated Badges */}
+            <div className="text-left space-y-2 flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-victory-green opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-victory-green border border-ink" />
+                </span>
+                <h3 className="font-heading text-xl sm:text-2xl uppercase tracking-wide text-ink">
+                  THE BATCHBOOK ERA
+                </h3>
+              </div>
+
+              <p className="font-sans text-xs text-olive-dark font-medium leading-relaxed">
+                Plug in the headphones, ignore the college noise, and grind straight for the <strong>9.0+ SGPA</strong>. Strictly high-yield QB & practice battles.
+              </p>
+
+              {/* Animated Stats / Vibe Pills */}
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                <span className="font-mono text-[10px] font-bold bg-comic-yellow text-ink px-2 py-0.5 rounded border border-ink shadow-[1px_1px_0px_#171510]">
+                  🔥 100% FOCUS
+                </span>
+                <span className="font-mono text-[10px] font-bold bg-cream text-ink px-2 py-0.5 rounded border border-ink shadow-[1px_1px_0px_#171510]">
+                  📚 SYLLABUS VAULT
+                </span>
+                <span className="font-mono text-[10px] font-bold bg-victory-green text-cream px-2 py-0.5 rounded border border-ink shadow-[1px_1px_0px_#171510]">
+                  🎯 9.0+ TARGET
+                </span>
+              </div>
             </div>
           </div>
 
-          <div className="flex justify-between items-center mt-3 text-xs font-mono text-ink/70">
-            <span>🎯 Target: 9.0+ SGPA</span>
-            <span>⚡ Next MCQ Battle: Midnight</span>
+          {/* Bottom ticker bar */}
+          <div className="mt-3.5 pt-2.5 border-t-2 border-ink/15 flex items-center justify-between text-[11px] font-mono text-ink/75">
+            <span className="flex items-center gap-1 font-bold">
+              <span className="animate-pulse text-punch-red">●</span> Live MCQ Battles
+            </span>
+            <span className="text-victory-green font-bold">
+              ✓ Verified Batchmates Only
+            </span>
           </div>
         </div>
       </section>
