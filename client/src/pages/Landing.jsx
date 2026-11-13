@@ -123,7 +123,7 @@ export const Landing = () => {
                 <Bot className="w-6 h-6 text-cream" />
               </div>
               <h3 className="font-heading text-2xl uppercase tracking-wide mb-2 text-ink">
-                Gemini RAG AI Buddy
+                AI Study Buddy
               </h3>
               <p className="font-sans text-xs text-ink/80 leading-relaxed font-medium">
                 Ask questions like "Give me answer to Question 10 of DBMS Unit 2 QB". The AI cites exact PDF pages without hallucinating fake answers.

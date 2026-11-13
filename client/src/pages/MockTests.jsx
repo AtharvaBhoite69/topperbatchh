@@ -28,7 +28,7 @@ export const MockTests = () => {
           <div className="font-bold text-ink mb-1">AVAILABLE NOW:</div>
           <div>• Daily 10-Question MCQ Battles</div>
           <div>• Unit-wise Previous Year Question Banks</div>
-          <div>• AI Gemini Question & Answer Solver</div>
+          <div>• AI Question & Answer Solver</div>
         </div>
 
         <div className="flex flex-wrap items-center justify-center gap-3">
