@@ -4,7 +4,7 @@ import Logo from '../components/shared/Logo';
 import ComicButton from '../components/ui/ComicButton';
 import ComicCard from '../components/ui/ComicCard';
 import { Starburst, ComicBadge } from '../components/ui/ComicElements';
-import { BookOpen, Bot, Zap, Trophy, MessageCircle, FileText, ArrowRight, ShieldCheck, Flame } from 'lucide-react';
+import { BookOpen, Bot, Zap, Trophy, MessageCircle, FileText, ArrowRight, ShieldCheck } from 'lucide-react';
 
 export const Landing = () => {
   return (
@@ -62,12 +62,6 @@ export const Landing = () => {
 
         {/* The Batchbook Era Card */}
         <div className="mt-12 w-full max-w-xl comic-box p-5 sm:p-6 bg-white relative overflow-hidden group">
-          {/* Badge Ribbon */}
-          <div className="absolute -top-3.5 right-4 bg-comic-yellow text-ink font-comic text-xs uppercase px-3 py-0.5 rounded border-2 border-ink shadow-[2px_2px_0px_#171510] -rotate-2 font-black flex items-center gap-1">
-            <Flame className="w-3.5 h-3.5 text-punch-red fill-punch-red animate-bounce" />
-            THE BATCHBOOK ERA
-          </div>
-
           <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-5">
             {/* The Meme Photo with Comic Polaroid Frame & Animation */}
             <div className="relative flex-shrink-0">
@@ -81,10 +75,6 @@ export const Landing = () => {
                 <span className="absolute bottom-1.5 left-2 font-mono text-[9px] font-bold text-cream tracking-wider uppercase drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
                   ⚡ 2004 VIBES
                 </span>
-              </div>
-              {/* Retro Comic Pin Sticker */}
-              <div className="absolute -bottom-2 -right-2 bg-punch-red text-cream font-comic text-[10px] uppercase font-bold px-2 py-0.5 rounded border border-ink shadow-[2px_2px_0px_#171510] rotate-3 animate-pulse">
-                LOCKED IN 🎧
               </div>
             </div>
 
