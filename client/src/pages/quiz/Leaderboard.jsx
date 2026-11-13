@@ -45,9 +45,9 @@ export const Leaderboard = () => {
           </div>
           <p className="font-sans text-xs text-olive-dark font-medium max-w-xl">
             Ranked by total challenge score with completion time as tiebreaker.{' '}
-            {type === 'daily' && 'Daily window runs 5:00 PM to 5:00 PM IST.'}
-            {type === 'weekly' && 'Weekly window runs Monday to Sunday IST.'}
-            {type === 'alltime' && 'All-time overall batch rankings.'}
+            {type === 'daily' && "Daily battle rankings from today's active challenge & 24h cycle."}
+            {type === 'weekly' && 'Weekly cumulative scores (Mon–Sun IST) across all daily battles.'}
+            {type === 'alltime' && 'All-time batch hall of fame interconnected across all battles.'}
           </p>
         </div>
 
@@ -110,6 +110,11 @@ export const Leaderboard = () => {
                   <div className="font-heading text-3xl text-ink mt-3">
                     {top3[1].score} PTS
                   </div>
+                  {top3[1].time_taken_seconds !== undefined && (
+                    <span className="font-mono text-[10px] text-ink/70 mt-1">
+                      ⏱️ {Math.floor(top3[1].time_taken_seconds / 60)}m {top3[1].time_taken_seconds % 60}s
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -131,6 +136,11 @@ export const Leaderboard = () => {
                   <div className="font-heading text-4xl text-ink mt-3">
                     {top3[0].score} PTS
                   </div>
+                  {top3[0].time_taken_seconds !== undefined && (
+                    <span className="font-mono text-[11px] text-ink/80 font-bold mt-1">
+                      ⏱️ {Math.floor(top3[0].time_taken_seconds / 60)}m {top3[0].time_taken_seconds % 60}s
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -149,6 +159,11 @@ export const Leaderboard = () => {
                   <div className="font-heading text-3xl text-ink mt-3">
                     {top3[2].score} PTS
                   </div>
+                  {top3[2].time_taken_seconds !== undefined && (
+                    <span className="font-mono text-[10px] text-ink/70 mt-1">
+                      ⏱️ {Math.floor(top3[2].time_taken_seconds / 60)}m {top3[2].time_taken_seconds % 60}s
+                    </span>
+                  )}
                 </div>
               )}
             </div>

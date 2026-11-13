@@ -290,17 +290,25 @@ export const DailyChallenge = () => {
           </h3>
         </div>
 
-        {history.length === 0 ? (
+        {history.filter((h) => !challenge || h.id !== challenge.id).length === 0 ? (
           <p className="text-xs text-olive-dark font-sans py-2">
             No past competitions recorded yet.
           </p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {history.map((h) => (
+            {history
+              .filter((h) => !challenge || h.id !== challenge.id)
+              .map((h) => (
               <ComicCard key={h.id} accent="olive" className="bg-white p-4">
                 <div className="flex justify-between items-start mb-2">
                   <span className="font-mono text-[10px] text-ink/70">
-                    {h.challenge_date ? String(h.challenge_date).split('T')[0] : ''}
+                    {h.challenge_date
+                      ? new Date(h.challenge_date).toLocaleDateString('en-IN', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                        })
+                      : ''}
                   </span>
                   {h.score !== null ? (
                     <span className="font-comic text-[11px] bg-victory-green text-cream px-1.5 py-0.5 rounded border border-ink">

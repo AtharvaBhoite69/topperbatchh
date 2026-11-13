@@ -451,7 +451,8 @@ function getIstLeaderboardWindow(type, now = new Date()) {
 
 /**
  * GET /api/quiz/leaderboard
- * Rankings: Daily (5 PM - 5 PM IST), Weekly (Mon - Sun IST), or All-Time
+ * Rankings: Daily (5 PM - 5 PM IST / Active Battle), Weekly (Mon - Sun IST), or All-Time
+ * Interconnected: Daily scores roll up into Weekly, and Weekly into All-Time.
  */
 router.get('/leaderboard', requireApproved, async (req, res, next) => {
   try {
@@ -461,16 +462,60 @@ router.get('/leaderboard', requireApproved, async (req, res, next) => {
     let query = '';
     let params = [];
 
-    if (type === 'daily' || type === 'weekly') {
-      const { start, end } = getIstLeaderboardWindow(type);
+    if (type === 'daily') {
+      const { start, end } = getIstLeaderboardWindow('daily');
+      const activeChallenge = await db.prepare(
+        'SELECT id FROM mcq_challenges WHERE is_active = 1 ORDER BY created_at DESC LIMIT 1'
+      ).get();
+
+      if (activeChallenge?.id) {
+        query = `
+          SELECT u.id as user_id, u.full_name, u.avatar_url, u.department, u.semester,
+                 SUM(qa.score) as score,
+                 SUM(qa.time_taken_seconds) as time_taken_seconds,
+                 SUM(qa.total_correct) as total_correct,
+                 COUNT(qa.id) as total_attempts
+          FROM quiz_attempts qa
+          JOIN users u ON qa.user_id = u.id
+          WHERE qa.is_submitted = 1
+            AND u.status = 'approved'
+            AND (qa.challenge_id = ? OR (qa.submitted_at >= ? AND qa.submitted_at < ?))
+          GROUP BY u.id, u.full_name, u.avatar_url, u.department, u.semester
+          ORDER BY score DESC, time_taken_seconds ASC
+          LIMIT 50
+        `;
+        params = [activeChallenge.id, start, end];
+      } else {
+        query = `
+          SELECT u.id as user_id, u.full_name, u.avatar_url, u.department, u.semester,
+                 SUM(qa.score) as score,
+                 SUM(qa.time_taken_seconds) as time_taken_seconds,
+                 SUM(qa.total_correct) as total_correct,
+                 COUNT(qa.id) as total_attempts
+          FROM quiz_attempts qa
+          JOIN users u ON qa.user_id = u.id
+          WHERE qa.is_submitted = 1
+            AND u.status = 'approved'
+            AND qa.submitted_at >= ?
+            AND qa.submitted_at < ?
+          GROUP BY u.id, u.full_name, u.avatar_url, u.department, u.semester
+          ORDER BY score DESC, time_taken_seconds ASC
+          LIMIT 50
+        `;
+        params = [start, end];
+      }
+    } else if (type === 'weekly') {
+      const { start, end } = getIstLeaderboardWindow('weekly');
       query = `
         SELECT u.id as user_id, u.full_name, u.avatar_url, u.department, u.semester,
                SUM(qa.score) as score,
                SUM(qa.time_taken_seconds) as time_taken_seconds,
-               SUM(qa.total_correct) as total_correct
+               SUM(qa.total_correct) as total_correct,
+               COUNT(qa.id) as total_attempts
         FROM quiz_attempts qa
         JOIN users u ON qa.user_id = u.id
         WHERE qa.is_submitted = 1
+          AND u.status = 'approved'
           AND qa.submitted_at >= ?
           AND qa.submitted_at < ?
         GROUP BY u.id, u.full_name, u.avatar_url, u.department, u.semester
@@ -479,14 +524,20 @@ router.get('/leaderboard', requireApproved, async (req, res, next) => {
       `;
       params = [start, end];
     } else {
-      // All-Time Leaderboard (preserved unchanged)
+      // All-Time Leaderboard - interconnected with quiz attempts and cumulative total_points
       query = `
         SELECT u.id as user_id, u.full_name, u.avatar_url, u.department, u.semester,
-               u.total_points as score, u.study_streak,
-               (SELECT COUNT(*) FROM quiz_attempts WHERE user_id = u.id AND is_submitted = 1) as total_attempts
+               COALESCE(SUM(qa.score), u.total_points, 0) as score,
+               COALESCE(SUM(qa.time_taken_seconds), 0) as time_taken_seconds,
+               COALESCE(SUM(qa.total_correct), 0) as total_correct,
+               COUNT(qa.id) as total_attempts,
+               u.study_streak
         FROM users u
-        WHERE u.status = 'approved' AND u.role = 'student'
-        ORDER BY u.total_points DESC, u.study_streak DESC
+        LEFT JOIN quiz_attempts qa ON qa.user_id = u.id AND qa.is_submitted = 1
+        WHERE u.status = 'approved'
+        GROUP BY u.id, u.full_name, u.avatar_url, u.department, u.semester, u.total_points, u.study_streak
+        HAVING COALESCE(SUM(qa.score), u.total_points, 0) > 0
+        ORDER BY score DESC, time_taken_seconds ASC, u.study_streak DESC
         LIMIT 50
       `;
     }
@@ -552,16 +603,21 @@ router.get('/daily/history', requireApproved, async (req, res, next) => {
   try {
     const db = getDb();
     await expireOldChallenges(db);
+    const activeChallenge = await db.prepare(
+      'SELECT id FROM mcq_challenges WHERE is_active = 1 ORDER BY created_at DESC LIMIT 1'
+    ).get();
+    const activeId = activeChallenge?.id || '';
+
     const history = await db.prepare(`
       SELECT c.id, c.title, c.challenge_date, s.name as subject_name,
              qa.score, qa.total_correct, qa.time_taken_seconds, qa.submitted_at
       FROM mcq_challenges c
       LEFT JOIN subjects s ON c.subject_id = s.id
       LEFT JOIN quiz_attempts qa ON qa.challenge_id = c.id AND qa.user_id = ?
-      WHERE c.is_published = 1 AND c.is_active = 0
+      WHERE c.is_published = 1 AND c.is_active = 0 AND c.id != ?
       ORDER BY c.challenge_date DESC, c.created_at DESC
       LIMIT 20
-    `).all(req.user.id);
+    `).all(req.user.id, activeId);
     return res.status(200).json({ success: true, history });
   } catch (err) {
     next(err);

@@ -190,3 +190,4 @@ export const FormattedMessage = ({ content, isStreaming }) => {
 };
 
 export default FormattedMessage;
+
