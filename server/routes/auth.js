@@ -87,7 +87,7 @@ router.post('/send-otp', authLimiter, async (req, res, next) => {
       });
     }
 
-    // Rate limiting: check recent OTP sent to this email within last 45 seconds
+    // Rate limiting: check recent OTP sent to this email within last 3 minutes (180 seconds)
     const recentOtp = await db.prepare(`
       SELECT created_at FROM email_verifications
       WHERE email = ? AND verified = 0
@@ -98,10 +98,13 @@ router.post('/send-otp', authLimiter, async (req, res, next) => {
     if (recentOtp?.created_at) {
       const createdTime = new Date(recentOtp.created_at).getTime();
       const secondsSince = (Date.now() - createdTime) / 1000;
-      if (secondsSince < 45) {
-        const waitSec = Math.ceil(45 - secondsSince);
+      if (secondsSince < 180) {
+        const waitSec = Math.ceil(180 - secondsSince);
+        const waitMin = Math.floor(waitSec / 60);
+        const waitRemainderSec = waitSec % 60;
+        const timeText = waitMin > 0 ? `${waitMin}m ${waitRemainderSec}s` : `${waitSec}s`;
         return res.status(429).json({
-          error: `Please wait ${waitSec}s before requesting a new code.`,
+          error: `Please wait ${timeText} before requesting a new code.`,
           retryAfter: waitSec,
         });
       }
@@ -174,12 +177,13 @@ router.post(
         }
 
         const cleanOtp = String(otp).trim();
+        const nowIso = new Date().toISOString();
         const otpRecord = await db.prepare(`
           SELECT * FROM email_verifications
-          WHERE email = ? AND verified = 0 AND expires_at > datetime('now')
+          WHERE email = ? AND verified = 0 AND expires_at > ?
           ORDER BY created_at DESC
           LIMIT 1
-        `).get(normalizedEmail);
+        `).get(normalizedEmail, nowIso);
 
         if (!otpRecord) {
           return res.status(400).json({
@@ -489,11 +493,12 @@ router.post('/reset-password', authLimiter, async (req, res, next) => {
 
     const db = getDb();
     const tokenHash = hashToken(token);
+    const nowIso = new Date().toISOString();
 
     const resetRecord = await db.prepare(`
       SELECT * FROM password_resets
-      WHERE token_hash = ? AND used = 0 AND expires_at > datetime('now')
-    `).get(tokenHash);
+      WHERE token_hash = ? AND used = 0 AND expires_at > ?
+    `).get(tokenHash, nowIso);
 
     if (!resetRecord) {
       return res.status(400).json({ error: 'Password reset link is invalid or has expired.' });

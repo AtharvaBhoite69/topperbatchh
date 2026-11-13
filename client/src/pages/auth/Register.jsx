@@ -22,8 +22,8 @@ export const Register = () => {
   const [loading, setLoading] = useState(false);
   const [isAutoApproved, setIsAutoApproved] = useState(false);
 
-  // OTP resend timer state
-  const [resendTimer, setResendTimer] = useState(45);
+  // OTP resend timer state: 3 minutes (180 seconds)
+  const [resendTimer, setResendTimer] = useState(180);
   const [canResend, setCanResend] = useState(false);
 
   const { register } = useAuth();
@@ -80,7 +80,7 @@ export const Register = () => {
       if (res.data?.success) {
         toast.success(res.data.message || 'Verification code sent to your Gmail!');
         setStep('otp');
-        setResendTimer(45);
+        setResendTimer(180);
         setCanResend(false);
         setOtp('');
       }
@@ -103,7 +103,7 @@ export const Register = () => {
       });
       if (res.data?.success) {
         toast.success('New 6-digit code sent to your Gmail!');
-        setResendTimer(45);
+        setResendTimer(180);
         setCanResend(false);
       }
     } catch (err) {
@@ -254,7 +254,7 @@ export const Register = () => {
               </button>
             ) : (
               <span className="font-mono text-olive-dark">
-                Resend code in {resendTimer}s
+                Resend code in {resendTimer > 60 ? `${Math.floor(resendTimer / 60)}m ${String(resendTimer % 60).padStart(2, '0')}s` : `${resendTimer}s`}
               </span>
             )}
           </div>
