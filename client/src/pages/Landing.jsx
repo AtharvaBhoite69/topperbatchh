@@ -71,10 +71,6 @@ export const Landing = () => {
                   alt="The Batchbook Era"
                   className="w-full h-full object-cover object-center transition-transform duration-500 ease-out group-hover:scale-110 group-hover:rotate-1"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-ink/50 via-transparent to-transparent opacity-60" />
-                <span className="absolute bottom-1.5 left-2 font-mono text-[9px] font-bold text-cream tracking-wider uppercase drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
-                  ⚡ 2004 VIBES
-                </span>
               </div>
             </div>
 
