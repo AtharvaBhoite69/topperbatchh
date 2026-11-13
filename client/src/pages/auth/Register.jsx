@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { auth as authApi } from '../../services/api';
 import AuthLayout from '../../components/layout/AuthLayout';
 import ComicInput from '../../components/ui/ComicInput';
 import ComicButton from '../../components/ui/ComicButton';
-import { User, Mail, Lock, GraduationCap, CheckCircle2 } from 'lucide-react';
+import { User, Mail, Lock, GraduationCap, CheckCircle2, ShieldCheck, ArrowLeft, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const Register = () => {
@@ -14,18 +15,48 @@ export const Register = () => {
   const [department, setDepartment] = useState('Computer Science');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [otp, setOtp] = useState('');
+
+  // Step state: 'form' | 'otp' | 'submitted'
+  const [step, setStep] = useState('form');
   const [loading, setLoading] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
   const [isAutoApproved, setIsAutoApproved] = useState(false);
+
+  // OTP resend timer state
+  const [resendTimer, setResendTimer] = useState(45);
+  const [canResend, setCanResend] = useState(false);
 
   const { register } = useAuth();
   const navigate = useNavigate();
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  useEffect(() => {
+    let timer = null;
+    if (step === 'otp' && resendTimer > 0) {
+      timer = setInterval(() => {
+        setResendTimer((prev) => {
+          if (prev <= 1) {
+            setCanResend(true);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [step, resendTimer]);
 
-    if (!fullName || !email || !password || !confirmPassword) {
+  const handleSendOtp = async (e) => {
+    if (e) e.preventDefault();
+
+    if (!fullName.trim() || !email.trim() || !password || !confirmPassword) {
       toast.error('All fields are required.');
+      return;
+    }
+
+    if (!email.includes('@') || !email.includes('.')) {
+      toast.error('Please enter a valid Gmail address.');
       return;
     }
 
@@ -40,35 +71,88 @@ export const Register = () => {
     }
 
     setLoading(true);
-
     try {
-      const res = await register({
-        fullName,
-        email,
-        semester: parseInt(semester, 10),
-        department,
-        password,
-        confirmPassword,
+      const res = await authApi.sendRegistrationOtp({
+        email: email.trim(),
+        fullName: fullName.trim(),
       });
 
-      if (res?.success) {
-        setSubmitted(true);
-        if (res.isAdmin || res.status === 'approved') {
-          setIsAutoApproved(true);
-          toast.success('Admin account auto-approved! Ready to log in.');
-        } else {
-          toast.success('Registration request sent to administrators!');
-        }
+      if (res.data?.success) {
+        toast.success(res.data.message || 'Verification code sent to your Gmail!');
+        setStep('otp');
+        setResendTimer(45);
+        setCanResend(false);
+        setOtp('');
       }
     } catch (err) {
-      const errMsg = err.response?.data?.error || 'Registration failed. Please check your inputs.';
+      const errMsg =
+        err.response?.data?.error || 'Could not send verification code. Please check your Gmail.';
       toast.error(errMsg);
     } finally {
       setLoading(false);
     }
   };
 
-  if (submitted) {
+  const handleResendOtp = async () => {
+    if (!canResend || loading) return;
+    setLoading(true);
+    try {
+      const res = await authApi.sendRegistrationOtp({
+        email: email.trim(),
+        fullName: fullName.trim(),
+      });
+      if (res.data?.success) {
+        toast.success('New 6-digit code sent to your Gmail!');
+        setResendTimer(45);
+        setCanResend(false);
+      }
+    } catch (err) {
+      const errMsg = err.response?.data?.error || 'Could not resend OTP.';
+      toast.error(errMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirmRegister = async (e) => {
+    e.preventDefault();
+
+    if (!otp || otp.trim().length < 6) {
+      toast.error('Please enter the full 6-digit verification code.');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const res = await register({
+        fullName: fullName.trim(),
+        email: email.trim(),
+        semester: parseInt(semester, 10),
+        department,
+        password,
+        confirmPassword,
+        otp: otp.trim(),
+      });
+
+      if (res?.success) {
+        setStep('submitted');
+        if (res.isAdmin || res.status === 'approved') {
+          setIsAutoApproved(true);
+          toast.success('Admin account auto-approved! Ready to log in.');
+        } else {
+          toast.success('Gmail verified & registration request sent to admins!');
+        }
+      }
+    } catch (err) {
+      const errMsg = err.response?.data?.error || 'Registration failed. Please check the OTP.';
+      toast.error(errMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (step === 'submitted') {
     return (
       <AuthLayout
         title={isAutoApproved ? 'ACCESS GRANTED!' : 'REQUEST SUBMITTED!'}
@@ -80,13 +164,13 @@ export const Register = () => {
           </div>
 
           <h3 className="font-heading text-2xl uppercase tracking-wide text-ink mb-2">
-            {isAutoApproved ? 'WELCOME, ADMINISTRATOR!' : 'AWAITING APPROVAL!'}
+            {isAutoApproved ? 'WELCOME, ADMINISTRATOR!' : 'GMAIL VERIFIED & AWAITING APPROVAL!'}
           </h3>
 
           <p className="font-sans text-xs text-olive-dark mb-6 leading-relaxed font-medium">
             {isAutoApproved
               ? 'Your email address matches the permanent administrator list. Your account is active immediately.'
-              : 'Thank you for registering! To maintain the security and privacy of TopperBatch materials, an administrator must approve your account before you can log in.'}
+              : 'Thank you for registering! Your Gmail address has been successfully verified. An administrator will review and approve your account shortly.'}
           </p>
 
           <Link to="/login">
@@ -99,12 +183,102 @@ export const Register = () => {
     );
   }
 
+  if (step === 'otp') {
+    return (
+      <AuthLayout
+        title="VERIFY YOUR GMAIL"
+        subtitle="We sent a 6-digit verification code to prove this Gmail is yours."
+      >
+        <form onSubmit={handleConfirmRegister} className="space-y-4">
+          <div className="comic-box bg-white p-4 text-center space-y-2">
+            <div className="w-12 h-12 bg-comic-yellow border-2 border-ink rounded-full flex items-center justify-center mx-auto shadow-[2px_2px_0px_#171510]">
+              <ShieldCheck className="w-6 h-6 text-ink" />
+            </div>
+
+            <div className="text-xs font-sans text-olive-dark">
+              Enter the 6-digit OTP code sent to:
+            </div>
+
+            <div className="flex items-center justify-center gap-2">
+              <span className="font-mono text-xs font-bold bg-cream px-2.5 py-1 border border-ink rounded truncate max-w-[240px]">
+                {email}
+              </span>
+              <button
+                type="button"
+                onClick={() => setStep('form')}
+                className="text-[11px] font-comic uppercase text-punch-red underline font-bold hover:text-ink cursor-pointer"
+              >
+                EDIT
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="font-comic text-xs uppercase tracking-wide text-ink block mb-1 text-left">
+              6-DIGIT VERIFICATION CODE
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={6}
+              autoFocus
+              value={otp}
+              onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="123456"
+              className="comic-input text-2xl font-mono font-bold tracking-[10px] text-center py-2.5 bg-white uppercase"
+              required
+            />
+            <p className="font-sans text-[11px] text-olive-dark mt-1 text-left">
+              Check your Gmail inbox and spam/promotions folder. Code expires in 10 minutes.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between text-xs pt-1">
+            <button
+              type="button"
+              onClick={() => setStep('form')}
+              className="font-comic text-xs text-ink/70 hover:text-ink flex items-center gap-1"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" /> Back to details
+            </button>
+
+            {canResend ? (
+              <button
+                type="button"
+                onClick={handleResendOtp}
+                disabled={loading}
+                className="font-comic uppercase text-punch-red font-bold hover:underline flex items-center gap-1"
+              >
+                <RefreshCw className="w-3 h-3" /> Resend Code
+              </button>
+            ) : (
+              <span className="font-mono text-olive-dark">
+                Resend code in {resendTimer}s
+              </span>
+            )}
+          </div>
+
+          <ComicButton
+            type="submit"
+            variant="green"
+            size="lg"
+            className="w-full mt-2"
+            loading={loading}
+          >
+            CONFIRM & SUBMIT REQUEST
+          </ComicButton>
+        </form>
+      </AuthLayout>
+    );
+  }
+
   return (
     <AuthLayout
       title="JOIN THE BATCH"
       subtitle="Register to access private question banks, AI study tools, and daily MCQ competitions."
     >
-      <form onSubmit={handleSubmit} className="space-y-3.5">
+      <form onSubmit={handleSendOtp} className="space-y-3.5">
         <ComicInput
           label="Full Name"
           type="text"
@@ -116,7 +290,7 @@ export const Register = () => {
         />
 
         <ComicInput
-          label="Gmail Address"
+          label="Gmail Address (OTP verification will be sent)"
           type="email"
           placeholder="yourname@gmail.com"
           icon={<Mail className="w-4 h-4" />}
@@ -188,7 +362,7 @@ export const Register = () => {
           className="w-full mt-3"
           loading={loading}
         >
-          JOIN THE BATCH!
+          VERIFY GMAIL & JOIN BATCH!
         </ComicButton>
       </form>
 

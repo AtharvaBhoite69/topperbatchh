@@ -62,6 +62,19 @@ function runMigrations() {
     );
 
     -- =========================================================================
+    -- Email OTP Verifications (Batch Registration Verification)
+    -- =========================================================================
+    CREATE TABLE IF NOT EXISTS email_verifications (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      otp_hash TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      attempts INTEGER DEFAULT 0,
+      verified INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- =========================================================================
     -- Semesters
     -- =========================================================================
     CREATE TABLE IF NOT EXISTS semesters (
@@ -433,6 +446,7 @@ function runMigrations() {
     'CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read)',
     'CREATE INDEX IF NOT EXISTS idx_audit_logs_admin_id ON audit_logs(admin_id)',
     'CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)',
+    'CREATE INDEX IF NOT EXISTS idx_email_verifications_email ON email_verifications(email)',
     'CREATE INDEX IF NOT EXISTS idx_mcq_draft_sessions_admin ON mcq_draft_sessions(admin_id)',
   ];
 

@@ -355,12 +355,38 @@ async function sendRejectionNotification(email, name) {
   return sendEmail(email, 'TopperBatch Account Update', html);
 }
 
+/**
+ * Send 6-digit OTP email verification code for batch registration.
+ * @param {string} email - Recipient email
+ * @param {string} otp - 6-digit verification code
+ * @param {string} [name] - User's name
+ */
+async function sendVerificationOtp(email, otp, name) {
+  const html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; max-width: 540px; margin: 0 auto; color: #171510; line-height: 1.6;">
+      <h2 style="color: #171510; margin-bottom: 8px;">TopperBatch Email Verification</h2>
+      <p>Hi ${escapeHtml(name || 'Student')},</p>
+      <p>Your one-time verification code (OTP) for requesting batch access on TopperBatch is:</p>
+      <div style="background: #F5E9D1; border: 2px solid #171510; padding: 14px 20px; font-size: 32px; font-weight: bold; letter-spacing: 8px; text-align: center; margin: 18px 0; border-radius: 6px; font-family: monospace; color: #171510;">
+        ${otp}
+      </div>
+      <p>This OTP is valid for <strong>10 minutes</strong>. Do not share this code with anyone.</p>
+      <p>If you did not request batch registration, please ignore this email.</p>
+      <hr style="border: none; border-top: 1px solid #e0d5c0; margin: 20px 0;">
+      <p style="color: #706a5b; font-size: 11px;">TopperBatch — Verified Batch Access</p>
+    </div>
+  `;
+  const text = `Hi ${name || 'Student'},\n\nYour TopperBatch verification code is: ${otp}\n\nThis code is valid for 10 minutes.\nIf you did not request this, please ignore this email.\n\nRegards,\nTopperBatch Team`;
+  return sendEmail(email, `${otp} is your TopperBatch verification code`, html, text);
+}
+
 module.exports = {
   sendEmail,
   sendBatchUpdateEmail,
   sendPasswordReset,
   sendApprovalNotification,
   sendRejectionNotification,
+  sendVerificationOtp,
   resetTransporter,
   getSmtpConfig,
 };

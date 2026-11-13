@@ -22,7 +22,26 @@ const {
   loginValidation,
   handleValidationErrors,
 } = require('../middleware/validator');
-const { sendPasswordReset } = require('../services/email');
+const { sendPasswordReset, sendVerificationOtp } = require('../services/email');
+
+/**
+ * Helper to ensure email_verifications table exists in database
+ */
+async function ensureEmailVerificationsTable(db) {
+  try {
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS email_verifications (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL,
+        otp_hash TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        attempts INTEGER DEFAULT 0,
+        verified INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+      )
+    `).run();
+  } catch (_) {}
+}
 
 /**
  * Helper to check if an email belongs to a permanent admin
@@ -34,8 +53,91 @@ function isPermanentAdmin(email) {
 }
 
 /**
+ * POST /api/auth/send-otp
+ * Send a 6-digit OTP to student's Gmail to verify ownership before registration
+ */
+router.post('/send-otp', authLimiter, async (req, res, next) => {
+  try {
+    const { email, fullName } = req.body;
+    if (!email || !email.trim()) {
+      return res.status(400).json({ error: 'Gmail address is required.' });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(normalizedEmail)) {
+      return res.status(400).json({ error: 'Please enter a valid email address.' });
+    }
+
+    const db = getDb();
+    await ensureEmailVerificationsTable(db);
+
+    // Check if user already exists
+    const existingUser = await db.prepare('SELECT id, status FROM users WHERE email = ?').get(normalizedEmail);
+    if (existingUser) {
+      if (existingUser.status === 'approved') {
+        return res.status(400).json({
+          error: 'This Gmail address is already registered. Please log in directly.',
+          isExisting: true,
+        });
+      }
+      return res.status(400).json({
+        error: 'A registration request for this Gmail is already submitted and pending admin approval.',
+        isPending: true,
+      });
+    }
+
+    // Rate limiting: check recent OTP sent to this email within last 45 seconds
+    const recentOtp = await db.prepare(`
+      SELECT created_at FROM email_verifications
+      WHERE email = ? AND verified = 0
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get(normalizedEmail);
+
+    if (recentOtp?.created_at) {
+      const createdTime = new Date(recentOtp.created_at).getTime();
+      const secondsSince = (Date.now() - createdTime) / 1000;
+      if (secondsSince < 45) {
+        const waitSec = Math.ceil(45 - secondsSince);
+        return res.status(429).json({
+          error: `Please wait ${waitSec}s before requesting a new code.`,
+          retryAfter: waitSec,
+        });
+      }
+    }
+
+    // Generate random 6-digit numeric OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpHash = hashToken(otp);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+    await db.prepare(`
+      INSERT INTO email_verifications (id, email, otp_hash, expires_at)
+      VALUES (?, ?, ?, ?)
+    `).run(generateId(), normalizedEmail, otpHash, expiresAt);
+
+    // Send email via Brevo / SMTP
+    const emailRes = await sendVerificationOtp(normalizedEmail, otp, fullName);
+
+    if (emailRes?.skipped) {
+      console.warn(`[OTP Skipped] SMTP not configured. OTP for ${normalizedEmail}: ${otp}`);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `6-digit verification code sent to ${normalizedEmail}! Check Inbox or Spam.`,
+      email: normalizedEmail,
+      devOtp: env.NODE_ENV === 'development' || emailRes?.skipped ? otp : undefined,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * POST /api/auth/register
- * Student registration flow.
+ * Student registration flow with Gmail OTP verification.
  * Admin emails are auto-approved as admins; others are created as 'pending'.
  */
 router.post(
@@ -45,20 +147,67 @@ router.post(
   handleValidationErrors,
   async (req, res, next) => {
     try {
-      const { email, password, fullName, semester, department } = req.body;
+      const { email, password, fullName, semester, department, otp } = req.body;
       const db = getDb();
+      await ensureEmailVerificationsTable(db);
       const normalizedEmail = email.trim().toLowerCase();
 
       // Check if user already exists
       const existingUser = await db.prepare('SELECT id, status FROM users WHERE email = ?').get(normalizedEmail);
       if (existingUser) {
-        // Return generic success-like response to avoid account enumeration
-        return res.status(200).json({
-          success: true,
-          message:
-            'Registration request submitted. If this email is new, an administrator will review your account.',
-          status: 'pending',
+        if (existingUser.status === 'approved') {
+          return res.status(400).json({ error: 'This Gmail address is already registered. Please log in.' });
+        }
+        return res.status(400).json({
+          error: 'A registration request for this Gmail is already submitted and pending admin approval.',
         });
+      }
+
+      const isAdmin = isPermanentAdmin(normalizedEmail);
+
+      // Verify OTP for student registrations (guarantees Gmail ownership)
+      if (!isAdmin) {
+        if (!otp || !String(otp).trim()) {
+          return res.status(400).json({
+            error: 'Please enter the 6-digit verification code sent to your Gmail.',
+          });
+        }
+
+        const cleanOtp = String(otp).trim();
+        const otpRecord = await db.prepare(`
+          SELECT * FROM email_verifications
+          WHERE email = ? AND verified = 0 AND expires_at > datetime('now')
+          ORDER BY created_at DESC
+          LIMIT 1
+        `).get(normalizedEmail);
+
+        if (!otpRecord) {
+          return res.status(400).json({
+            error: 'Verification code expired or not found. Please click "Resend Code" to receive a new OTP.',
+          });
+        }
+
+        if (otpRecord.attempts >= 5) {
+          return res.status(400).json({
+            error: 'Too many incorrect attempts. Please request a new verification code.',
+          });
+        }
+
+        const inputHash = hashToken(cleanOtp);
+        if (inputHash !== otpRecord.otp_hash) {
+          await db
+            .prepare('UPDATE email_verifications SET attempts = attempts + 1 WHERE id = ?')
+            .run(otpRecord.id);
+          const remaining = 5 - (otpRecord.attempts + 1);
+          return res.status(400).json({
+            error: `Invalid verification code. ${
+              remaining > 0 ? `${remaining} attempt(s) remaining.` : 'Please request a new code.'
+            }`,
+          });
+        }
+
+        // Mark OTP as verified
+        await db.prepare('UPDATE email_verifications SET verified = 1 WHERE id = ?').run(otpRecord.id);
       }
 
       // Hash password
@@ -66,7 +215,6 @@ router.post(
       const passwordHash = await bcrypt.hash(password, salt);
 
       const userId = generateId();
-      const isAdmin = isPermanentAdmin(normalizedEmail);
       const role = isAdmin ? 'admin' : 'student';
       const status = isAdmin ? 'approved' : 'pending';
 
