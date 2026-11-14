@@ -111,6 +111,8 @@ router.post('/generate', upload.single('file'), async (req, res, next) => {
       question_style = 'mixed',
       topic = '',
       instructions = '',
+      department = 'AI & ML',
+      semester = 5,
     } = req.body;
 
     const db = getDb();
@@ -151,14 +153,17 @@ router.post('/generate', upload.single('file'), async (req, res, next) => {
       instructions: instructions ? instructions.trim() : '',
     });
 
+    const targetDept = department ? department.trim() : null;
+    const targetSem = semester ? parseInt(semester, 10) : null;
+
     // Save as draft session
     const sessionId = generateId();
     await db.prepare(`
       INSERT INTO mcq_draft_sessions (
         id, admin_id, document_id, source_pdf_name, topic,
         difficulty, question_style, question_count, instructions,
-        status, generated_data
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'review', ?)
+        department, semester, status, generated_data
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'review', ?)
     `).run(
       sessionId,
       req.user.id,
@@ -169,6 +174,8 @@ router.post('/generate', upload.single('file'), async (req, res, next) => {
       question_style,
       result.questions.length,
       instructions || null,
+      targetDept,
+      targetSem,
       JSON.stringify(result.questions)
     );
 
@@ -179,6 +186,8 @@ router.post('/generate', upload.single('file'), async (req, res, next) => {
       pageCount: result.pageCount,
       summary: result.summary,
       insufficientContentReason: result.insufficientContentReason,
+      department: targetDept,
+      semester: targetSem,
       questions: result.questions,
     });
   } catch (err) {
@@ -274,7 +283,7 @@ router.get('/drafts', async (req, res, next) => {
     const db = getDb();
     const drafts = await db.prepare(`
       SELECT id, source_pdf_name, topic, difficulty, question_style,
-             question_count, status, created_at, updated_at
+             question_count, department, semester, status, created_at, updated_at
       FROM mcq_draft_sessions
       WHERE admin_id = ?
       ORDER BY updated_at DESC
@@ -322,18 +331,26 @@ router.get('/drafts/:id', async (req, res, next) => {
 router.put('/drafts/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { questions } = req.body;
+    const { questions, department, semester } = req.body;
 
     if (!Array.isArray(questions)) {
       return res.status(400).json({ error: 'Questions array is required.' });
     }
 
     const db = getDb();
-    await db.prepare(`
-      UPDATE mcq_draft_sessions
-      SET generated_data = ?, question_count = ?, updated_at = datetime('now')
-      WHERE id = ?
-    `).run(JSON.stringify(questions), questions.length, id);
+    if (department !== undefined || semester !== undefined) {
+      await db.prepare(`
+        UPDATE mcq_draft_sessions
+        SET generated_data = ?, question_count = ?, department = COALESCE(?, department), semester = COALESCE(?, semester), updated_at = datetime('now')
+        WHERE id = ?
+      `).run(JSON.stringify(questions), questions.length, department ? department.trim() : null, semester ? parseInt(semester, 10) : null, id);
+    } else {
+      await db.prepare(`
+        UPDATE mcq_draft_sessions
+        SET generated_data = ?, question_count = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(JSON.stringify(questions), questions.length, id);
+    }
 
     return res.status(200).json({ success: true, message: 'Draft updated successfully.' });
   } catch (err) {
@@ -417,8 +434,8 @@ router.post('/publish', async (req, res, next) => {
     const insertQuestionStmt = db.prepare(`
       INSERT INTO questions (
         id, challenge_id, question_text, explanation, difficulty,
-        subject_id, is_approved, page_number, topic, source_pdf_name, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+        subject_id, department, semester, is_approved, page_number, topic, source_pdf_name, created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
     `);
 
     const insertOptionStmt = db.prepare(`
@@ -436,6 +453,8 @@ router.post('/publish', async (req, res, next) => {
         q.explanation || null,
         ['easy', 'medium', 'hard'].includes((q.difficulty || '').toLowerCase()) ? q.difficulty.toLowerCase() : 'medium',
         subjectId || null,
+        department ? department.trim() : null,
+        semester ? parseInt(semester, 10) : null,
         parseInt(q.source_page || 1, 10),
         q.topic || null,
         q.source_pdf || null,

@@ -414,6 +414,8 @@ function runMigrations() {
       question_style TEXT DEFAULT 'mixed',
       question_count INTEGER DEFAULT 10,
       instructions TEXT,
+      department TEXT,
+      semester INTEGER,
       status TEXT DEFAULT 'draft' CHECK(status IN ('draft', 'review', 'published')),
       generated_data TEXT,
       created_at TEXT DEFAULT (datetime('now')),
@@ -491,6 +493,10 @@ function runMigrations() {
   try { db.exec('ALTER TABLE mcq_challenges ADD COLUMN semester INTEGER'); } catch (_) {}
   try { db.exec('ALTER TABLE community_channels ADD COLUMN department TEXT'); } catch (_) {}
   try { db.exec('ALTER TABLE community_channels ADD COLUMN semester INTEGER'); } catch (_) {}
+  try { db.exec('ALTER TABLE mcq_draft_sessions ADD COLUMN department TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE mcq_draft_sessions ADD COLUMN semester INTEGER'); } catch (_) {}
+  try { db.exec('ALTER TABLE questions ADD COLUMN department TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE questions ADD COLUMN semester INTEGER'); } catch (_) {}
 
   console.log('✅ Database migrations completed successfully.');
 }

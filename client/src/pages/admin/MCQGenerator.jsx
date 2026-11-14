@@ -17,6 +17,7 @@ import {
   ChevronDown,
   Layers,
   ArrowRight,
+  GraduationCap,
 } from 'lucide-react';
 import ComicButton from '../../components/ui/ComicButton';
 import ComicCard from '../../components/ui/ComicCard';
@@ -25,6 +26,18 @@ import { ComicBadge } from '../../components/ui/ComicElements';
 import { mcqGenerator as mcqApi, documents as docApi, quiz as quizApi } from '../../services/api';
 import toast from 'react-hot-toast';
 
+const DEPARTMENTS = [
+  'AI & ML',
+  'Computer Science',
+  'Information Tech',
+  'Data Science',
+  'Electronics',
+  'Computer Engineering',
+  'All Departments (Common)',
+];
+
+const SEMESTERS = [1, 2, 3, 4, 5, 6, 7, 8];
+
 export const MCQGenerator = () => {
   // Step 1: Configuration States
   const [sourceMode, setSourceMode] = useState('upload'); // 'upload' | 'vault'
@@ -32,6 +45,10 @@ export const MCQGenerator = () => {
   const [selectedVaultDocId, setSelectedVaultDocId] = useState('');
   const [pdfFile, setPdfFile] = useState(null);
   const [pdfFileName, setPdfFileName] = useState('');
+
+  // Target Cohort (Department & Semester)
+  const [targetDepartment, setTargetDepartment] = useState('AI & ML');
+  const [targetSemester, setTargetSemester] = useState(5);
 
   const [questionCount, setQuestionCount] = useState(10);
   const [difficulty, setDifficulty] = useState('mixed');
@@ -53,7 +70,7 @@ export const MCQGenerator = () => {
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [publishType, setPublishType] = useState('challenge'); // 'challenge' | 'question_bank' | 'both'
   const [challengeTitle, setChallengeTitle] = useState('');
-  const [publishDepartment, setPublishDepartment] = useState('Computer Science');
+  const [publishDepartment, setPublishDepartment] = useState('AI & ML');
   const [publishSemester, setPublishSemester] = useState(5);
   const [challengeDate, setChallengeDate] = useState(new Date().toISOString().split('T')[0]);
   const [durationMinutes, setDurationMinutes] = useState(15);
@@ -66,6 +83,40 @@ export const MCQGenerator = () => {
   const [loadingDrafts, setLoadingDrafts] = useState(false);
 
   const fileInputRef = useRef(null);
+
+  // Synchronize department change across generation config and publish modal
+  const handleDepartmentChange = (dept) => {
+    setTargetDepartment(dept);
+    setPublishDepartment(dept === 'All Departments (Common)' ? 'All' : dept);
+  };
+
+  // Synchronize semester change across generation config and publish modal
+  const handleSemesterChange = (sem) => {
+    const val = parseInt(sem, 10);
+    setTargetSemester(val);
+    setPublishSemester(val);
+  };
+
+  // When a Vault document is selected, auto-sync department and semester tags
+  const handleVaultDocSelect = (docId) => {
+    setSelectedVaultDocId(docId);
+    if (!docId) return;
+    const doc = vaultDocuments.find((d) => d.id === docId);
+    if (doc) {
+      if (doc.department) {
+        setTargetDepartment(doc.department);
+        setPublishDepartment(doc.department === 'All' ? 'All' : doc.department);
+      }
+      if (doc.semester_id) {
+        const sem = parseInt(doc.semester_id, 10);
+        setTargetSemester(sem);
+        setPublishSemester(sem);
+      }
+      if (doc.topic) {
+        setTopic(doc.topic);
+      }
+    }
+  };
 
   // Load existing vault documents on mount
   useEffect(() => {
@@ -127,6 +178,8 @@ export const MCQGenerator = () => {
     formData.append('question_style', questionStyle);
     formData.append('topic', topic.trim());
     formData.append('instructions', customInstructions.trim());
+    formData.append('department', targetDepartment);
+    formData.append('semester', targetSemester);
 
     try {
       const res = await mcqApi.generate(formData);
@@ -242,7 +295,11 @@ export const MCQGenerator = () => {
       return;
     }
     try {
-      await mcqApi.updateDraft(sessionId, { questions });
+      await mcqApi.updateDraft(sessionId, {
+        questions,
+        department: targetDepartment,
+        semester: targetSemester,
+      });
       toast.success('💾 Draft saved! You can resume editing anytime.');
     } catch (err) {
       toast.error('Failed to save draft.');
@@ -276,6 +333,15 @@ export const MCQGenerator = () => {
         setTopic(d.topic || '');
         setDifficulty(d.difficulty || 'mixed');
         setQuestionStyle(d.question_style || 'mixed');
+        if (d.department) {
+          setTargetDepartment(d.department);
+          setPublishDepartment(d.department === 'All' ? 'All' : d.department);
+        }
+        if (d.semester) {
+          const sem = parseInt(d.semester, 10);
+          setTargetSemester(sem);
+          setPublishSemester(sem);
+        }
         setQuestions((d.questions || []).map((q) => ({ ...q, is_approved: q.is_approved ?? true })));
         setShowDraftsDrawer(false);
         toast.success(`Resumed draft: "${d.source_pdf_name}"!`);
@@ -438,18 +504,74 @@ export const MCQGenerator = () => {
               </label>
               <select
                 value={selectedVaultDocId}
-                onChange={(e) => setSelectedVaultDocId(e.target.value)}
+                onChange={(e) => handleVaultDocSelect(e.target.value)}
                 className="comic-input text-xs sm:text-sm bg-white font-mono py-2.5"
               >
                 <option value="">-- Choose a Question Bank / Material --</option>
                 {vaultDocuments.map((doc) => (
                   <option key={doc.id} value={doc.id}>
-                    {doc.title} ({doc.page_count || 1} pages)
+                    {doc.title} [{doc.department || 'All Depts'} • Sem {doc.semester_id || 'All'}] ({doc.page_count || 1} pages)
                   </option>
                 ))}
               </select>
             </div>
           )}
+
+          {/* Target Cohort Assignment: Which Department & Semester should I upload to? */}
+          <div className="comic-box-sm p-4 bg-comic-yellow/20 border-2 border-ink rounded-lg shadow-[3px_3px_0px_#171510]">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+              <div className="flex items-center gap-2">
+                <GraduationCap className="w-5 h-5 text-punch-red flex-shrink-0" />
+                <div>
+                  <span className="font-heading text-sm uppercase tracking-wide text-ink block">
+                    WHICH DEPARTMENT SHOULD I UPLOAD TO?
+                  </span>
+                  <span className="font-sans text-[11px] text-vintage-olive">
+                    Selected department students will receive these MCQs in their daily battle & practice arena.
+                  </span>
+                </div>
+              </div>
+              <ComicBadge variant="dark" size="sm">
+                Cohort: {targetDepartment} • Sem {targetSemester}
+              </ComicBadge>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="font-comic text-xs uppercase text-ink block mb-1">
+                  TARGET DEPARTMENT:
+                </label>
+                <select
+                  value={targetDepartment}
+                  onChange={(e) => handleDepartmentChange(e.target.value)}
+                  className="comic-input text-xs sm:text-sm bg-white font-bold"
+                >
+                  {DEPARTMENTS.map((dept) => (
+                    <option key={dept} value={dept === 'All Departments (Common)' ? 'All' : dept}>
+                      {dept}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-comic text-xs uppercase text-ink block mb-1">
+                  TARGET SEMESTER:
+                </label>
+                <select
+                  value={targetSemester}
+                  onChange={(e) => handleSemesterChange(e.target.value)}
+                  className="comic-input text-xs sm:text-sm bg-white font-bold"
+                >
+                  {SEMESTERS.map((s) => (
+                    <option key={s} value={s}>
+                      Semester {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
 
           {/* Controls Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 pt-2">
@@ -573,7 +695,7 @@ export const MCQGenerator = () => {
                 </span>
               </div>
               <p className="font-mono text-xs text-olive-dark mt-0.5 truncate max-w-xl">
-                Source: <strong>{sourcePdfName}</strong> • {pageCount} pages analyzed
+                Source: <strong>{sourcePdfName}</strong> • {pageCount} pages • Target: <span className="font-bold text-punch-red">{targetDepartment} (Sem {targetSemester})</span>
               </p>
             </div>
 
@@ -841,6 +963,43 @@ export const MCQGenerator = () => {
                 </div>
               </div>
 
+              {/* Target Cohort: Always assigned whether publishing to Challenge or Question Bank */}
+              <div className="grid grid-cols-2 gap-3 p-3 bg-comic-yellow/15 border-2 border-ink/40 rounded">
+                <div>
+                  <label className="font-comic text-xs uppercase text-ink block mb-1">
+                    TARGET DEPARTMENT:
+                  </label>
+                  <select
+                    value={publishDepartment}
+                    onChange={(e) => setPublishDepartment(e.target.value)}
+                    className="comic-input text-xs bg-white font-bold"
+                  >
+                    {DEPARTMENTS.map((d) => (
+                      <option key={d} value={d === 'All Departments (Common)' ? 'All' : d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="font-comic text-xs uppercase text-ink block mb-1">
+                    TARGET SEMESTER:
+                  </label>
+                  <select
+                    value={publishSemester}
+                    onChange={(e) => setPublishSemester(parseInt(e.target.value, 10))}
+                    className="comic-input text-xs bg-white font-bold"
+                  >
+                    {SEMESTERS.map((s) => (
+                      <option key={s} value={s}>
+                        Semester {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               {publishType === 'challenge' && (
                 <>
                   <div>
@@ -854,49 +1013,6 @@ export const MCQGenerator = () => {
                       onChange={(e) => setChallengeTitle(e.target.value)}
                       className="comic-input text-xs sm:text-sm bg-white"
                     />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="font-comic text-xs uppercase text-ink block mb-1">
-                        TARGET DEPARTMENT:
-                      </label>
-                      <select
-                        value={publishDepartment}
-                        onChange={(e) => setPublishDepartment(e.target.value)}
-                        className="comic-input text-xs bg-white"
-                      >
-                        {[
-                          'Computer Science',
-                          'Information Tech',
-                          'Data Science',
-                          'AI & ML',
-                          'Electronics',
-                          'All Departments (Common)',
-                        ].map((d) => (
-                          <option key={d} value={d === 'All Departments (Common)' ? 'All' : d}>
-                            {d}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="font-comic text-xs uppercase text-ink block mb-1">
-                        TARGET SEMESTER:
-                      </label>
-                      <select
-                        value={publishSemester}
-                        onChange={(e) => setPublishSemester(e.target.value)}
-                        className="comic-input text-xs bg-white"
-                      >
-                        {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => (
-                          <option key={s} value={s}>
-                            Semester {s}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
@@ -995,7 +1111,7 @@ export const MCQGenerator = () => {
                         {d.source_pdf_name}
                       </span>
                       <span className="font-mono text-[10px] text-olive-dark block">
-                        {d.question_count} MCQs • {d.difficulty} • {d.status} • {d.updated_at?.slice(0, 10)}
+                        {d.question_count} MCQs • {d.department || 'All Depts'} • Sem {d.semester || 'All'} • {d.difficulty} • {d.status} • {d.updated_at?.slice(0, 10)}
                       </span>
                     </div>
 
