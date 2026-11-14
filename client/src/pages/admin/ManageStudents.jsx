@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import ComicButton from '../../components/ui/ComicButton';
 import ComicCard from '../../components/ui/ComicCard';
 import ComicInput from '../../components/ui/ComicInput';
@@ -8,8 +8,12 @@ import { admin as adminApi } from '../../services/api';
 import { Users, Search, Shield, Ban, CheckCircle, Eye, Mail, Send, Clock, Check, X, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-export const ManageStudents = () => {
-  const [activeTab, setActiveTab] = useState('roster'); // 'roster' | 'requests'
+export const ManageStudents = ({ initialTab = 'roster' }) => {
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState(
+    tabParam === 'requests' || initialTab === 'requests' ? 'requests' : 'roster'
+  );
   const [students, setStudents] = useState([]);
   const [statusFilter, setStatusFilter] = useState('all');
   const [search, setSearch] = useState('');

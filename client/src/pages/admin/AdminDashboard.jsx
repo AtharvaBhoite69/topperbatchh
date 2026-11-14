@@ -17,37 +17,77 @@ import {
   Settings,
   Upload,
   Sparkles,
+  ArrowLeftRight,
+  Check,
+  X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const AdminDashboard = () => {
   const [stats, setStats] = useState(null);
   const [pendingRecruits, setPendingRecruits] = useState([]);
+  const [pendingDeptRequests, setPendingDeptRequests] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [processingRequestId, setProcessingRequestId] = useState(null);
+
+  const fetchAdminData = async () => {
+    try {
+      const [statsRes, regRes, deptRes] = await Promise.all([
+        adminApi.getStats(),
+        adminApi.getRegistrations(),
+        adminApi.getDepartmentRequests({ status: 'pending' }),
+      ]);
+
+      if (statsRes.data?.success) {
+        setStats(statsRes.data.stats);
+      }
+      if (regRes.data?.success) {
+        setPendingRecruits(regRes.data.registrations || []);
+      }
+      if (deptRes.data?.success) {
+        setPendingDeptRequests(deptRes.data.requests || []);
+      }
+    } catch (err) {
+      toast.error('Failed to load admin stats.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchAdminData = async () => {
-      try {
-        const [statsRes, regRes] = await Promise.all([
-          adminApi.getStats(),
-          adminApi.getRegistrations(),
-        ]);
-
-        if (statsRes.data?.success) {
-          setStats(statsRes.data.stats);
-        }
-        if (regRes.data?.success) {
-          setPendingRecruits(regRes.data.registrations || []);
-        }
-      } catch (err) {
-        toast.error('Failed to load admin stats.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchAdminData();
   }, []);
+
+  const handleApproveDept = async (id) => {
+    setProcessingRequestId(id);
+    try {
+      const res = await adminApi.approveDepartmentRequest(id);
+      if (res.data?.success) {
+        toast.success('Department & Semester transfer approved!');
+        fetchAdminData();
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to approve request.');
+    } finally {
+      setProcessingRequestId(null);
+    }
+  };
+
+  const handleRejectDept = async (id) => {
+    const reason = window.prompt('Reason for declining transfer (optional):');
+    setProcessingRequestId(id);
+    try {
+      const res = await adminApi.rejectDepartmentRequest(id, { admin_notes: reason });
+      if (res.data?.success) {
+        toast.success('Transfer request declined.');
+        fetchAdminData();
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to decline request.');
+    } finally {
+      setProcessingRequestId(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -115,11 +155,17 @@ export const AdminDashboard = () => {
             <Clock className="w-4 h-4 text-punch-red" />
           </div>
           <div className="font-heading text-3xl text-punch-red mt-1">
-            {s.pendingStudents || 0}
+            {(s.pendingStudents || 0) + (pendingDeptRequests.length || 0)}
           </div>
-          <Link to="/admin/registrations" className="text-[10px] font-mono text-punch-red underline block mt-1 font-bold">
-            Review requests →
-          </Link>
+          <div className="flex items-center gap-2 mt-1">
+            <Link to="/admin/registrations" className="text-[10px] font-mono text-punch-red underline font-bold">
+              Recruits ({pendingRecruits.length}) →
+            </Link>
+            <span className="text-ink/40">•</span>
+            <Link to="/admin/dept-requests" className="text-[10px] font-mono text-punch-red underline font-bold">
+              Transfers ({pendingDeptRequests.length}) →
+            </Link>
+          </div>
         </ComicCard>
 
         <ComicCard accent="olive" className="bg-white p-4">
@@ -190,6 +236,80 @@ export const AdminDashboard = () => {
             <ArrowRight className="w-4 h-4 text-punch-red" />
           </div>
         </Link>
+      </div>
+
+      {/* Pending Academic Department & Semester Transfers */}
+      <div className="comic-box bg-white p-6">
+        <div className="flex items-center justify-between mb-4 border-b-2 border-ink/20 pb-3">
+          <div className="flex items-center gap-2">
+            <ArrowLeftRight className="w-5 h-5 text-punch-red" />
+            <h3 className="font-heading text-xl uppercase tracking-wide text-ink">
+              ACADEMIC DEPT & SEMESTER TRANSFERS ({pendingDeptRequests.length})
+            </h3>
+          </div>
+          <Link
+            to="/admin/dept-requests"
+            className="font-comic text-xs uppercase text-punch-red hover:underline flex items-center gap-1 font-bold"
+          >
+            OPEN REQUESTS PANEL →
+          </Link>
+        </div>
+
+        {pendingDeptRequests.length === 0 ? (
+          <p className="text-xs text-olive-dark font-sans py-4 text-center">
+            ✓ No pending department or semester transfer requests awaiting verification.
+          </p>
+        ) : (
+          <div className="divide-y-2 divide-ink/10">
+            {pendingDeptRequests.slice(0, 5).map((req) => (
+              <div key={req.id} className="py-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <h5 className="font-heading text-sm uppercase text-ink">
+                      {req.student_name}
+                    </h5>
+                    <span className="font-mono text-xs text-olive-dark">
+                      ({req.student_email})
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 font-mono text-xs">
+                    <span className="bg-cream px-1.5 py-0.2 border border-ink rounded text-ink/70">
+                      {req.current_department || 'Computer Science'} Sem {req.current_semester || 1}
+                    </span>
+                    <ArrowRight className="w-3.5 h-3.5 text-punch-red" />
+                    <span className="bg-comic-yellow font-bold px-1.5 py-0.2 border border-ink rounded text-ink">
+                      {req.requested_department} Sem {req.requested_semester}
+                    </span>
+                    {req.reason && (
+                      <span className="text-[11px] text-olive-dark italic">
+                        • Reason: "{req.reason}"
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-end sm:self-center">
+                  <button
+                    onClick={() => handleApproveDept(req.id)}
+                    disabled={processingRequestId === req.id}
+                    className="comic-btn comic-btn-green text-xs px-2.5 py-1 flex items-center gap-1"
+                  >
+                    <Check className="w-3.5 h-3.5" /> APPROVE
+                  </button>
+
+                  <button
+                    onClick={() => handleRejectDept(req.id)}
+                    disabled={processingRequestId === req.id}
+                    className="comic-btn comic-btn-red text-xs px-2.5 py-1 flex items-center gap-1"
+                  >
+                    <X className="w-3.5 h-3.5" /> DECLINE
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Pending Registrations Preview */}

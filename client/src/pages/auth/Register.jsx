@@ -326,11 +326,12 @@ export const Register = () => {
               onChange={(e) => setDepartment(e.target.value)}
               className="comic-input text-xs py-2 bg-white"
             >
+              <option value="AI & ML">AI & ML</option>
               <option value="Computer Science">Computer Science</option>
               <option value="Information Tech">Information Tech</option>
               <option value="Data Science">Data Science</option>
-              <option value="AI & ML">AI & ML</option>
               <option value="Electronics">Electronics</option>
+              <option value="Computer Engineering">Computer Engineering</option>
             </select>
           </div>
         </div>

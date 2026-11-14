@@ -129,6 +129,14 @@ export const App = () => {
                 }
               />
               <Route
+                path="/admin/dept-requests"
+                element={
+                  <AdminRoute>
+                    <ManageStudents initialTab="requests" />
+                  </AdminRoute>
+                }
+              />
+              <Route
                 path="/admin/students"
                 element={
                   <AdminRoute>

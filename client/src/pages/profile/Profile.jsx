@@ -16,6 +16,7 @@ import {
   CheckCircle,
   Clock,
   Sparkles,
+  ArrowLeftRight,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -27,22 +28,28 @@ export const Profile = () => {
   // Edit Modal State
   const [isEditing, setIsEditing] = useState(false);
   const [fullName, setFullName] = useState('');
-  const [semester, setSemester] = useState(3);
-  const [department, setDepartment] = useState('');
   const [bio, setBio] = useState('');
-  const [changeReason, setChangeReason] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // Dedicated Academic Transfer Modal State
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [transferDept, setTransferDept] = useState('AI & ML');
+  const [transferSem, setTransferSem] = useState(5);
+  const [transferReason, setTransferReason] = useState('Branch Transfer (College Approved)');
+  const [transferCustomNote, setTransferCustomNote] = useState('');
+  const [submittingTransfer, setSubmittingTransfer] = useState(false);
 
   useEffect(() => {
     const fetchProfile = async () => {
       try {
         const res = await profileApi.getProfile();
         if (res.data?.success && res.data.profile) {
-          setProfileData(res.data.profile);
-          setFullName(res.data.profile.full_name || '');
-          setSemester(res.data.profile.semester || 3);
-          setDepartment(res.data.profile.department || '');
-          setBio(res.data.profile.bio || '');
+          const prof = res.data.profile;
+          setProfileData(prof);
+          setFullName(prof.full_name || '');
+          setBio(prof.bio || '');
+          setTransferDept(prof.department || 'AI & ML');
+          setTransferSem(prof.semester || 5);
         }
       } catch (err) {
         toast.error('Failed to load profile details.');
@@ -60,27 +67,56 @@ export const Profile = () => {
     try {
       const res = await profileApi.updateProfile({
         full_name: fullName,
-        semester: parseInt(semester, 10),
-        department,
         bio,
-        change_reason: changeReason,
       });
 
       if (res.data?.success) {
         setProfileData((prev) => ({
           ...prev,
           ...res.data.profile,
-          pendingChangeRequest: res.data.pendingChangeRequest !== undefined ? res.data.pendingChangeRequest : prev?.pendingChangeRequest,
         }));
         updateUser(res.data.profile);
         setIsEditing(false);
-        setChangeReason('');
-        toast.success(res.data.message || 'Profile updated successfully!');
+        toast.success('Profile details saved!');
       }
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to update profile.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRequestTransfer = async (e) => {
+    e.preventDefault();
+    setSubmittingTransfer(true);
+    const reasonText =
+      transferReason === 'Other Reason (Specify below)'
+        ? transferCustomNote.trim() || 'Other transfer'
+        : transferReason;
+
+    try {
+      const res = await profileApi.updateProfile({
+        department: transferDept,
+        semester: parseInt(transferSem, 10),
+        change_reason: reasonText,
+      });
+
+      if (res.data?.success) {
+        setProfileData((prev) => ({
+          ...prev,
+          pendingChangeRequest: res.data.pendingChangeRequest || {
+            requested_department: transferDept,
+            requested_semester: parseInt(transferSem, 10),
+            reason: reasonText,
+          },
+        }));
+        setIsTransferModalOpen(false);
+        toast.success(res.data.message || 'Transfer request submitted for Admin verification!');
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to submit transfer request.');
+    } finally {
+      setSubmittingTransfer(false);
     }
   };
 
@@ -168,14 +204,33 @@ export const Profile = () => {
           </div>
         </div>
 
-        <ComicButton
-          variant="yellow"
-          size="sm"
-          onClick={() => setIsEditing(true)}
-          icon={<Edit className="w-4 h-4" />}
-        >
-          EDIT PROFILE
-        </ComicButton>
+        <div className="flex flex-col sm:flex-row items-center gap-2">
+          {p.role !== 'admin' && (
+            <ComicButton
+              variant="white"
+              size="sm"
+              onClick={() => {
+                setTransferDept(p.department || 'AI & ML');
+                setTransferSem(p.semester || 5);
+                setTransferReason('Branch Transfer (College Approved)');
+                setTransferCustomNote('');
+                setIsTransferModalOpen(true);
+              }}
+              icon={<ArrowLeftRight className="w-4 h-4 text-punch-red" />}
+            >
+              CHANGE DEPT / SEM
+            </ComicButton>
+          )}
+
+          <ComicButton
+            variant="yellow"
+            size="sm"
+            onClick={() => setIsEditing(true)}
+            icon={<Edit className="w-4 h-4" />}
+          >
+            EDIT PROFILE
+          </ComicButton>
+        </div>
       </div>
 
       {/* Gamification Stats Row */}
@@ -255,7 +310,7 @@ export const Profile = () => {
         </div>
       </div>
 
-      {/* Edit Profile Modal */}
+      {/* Edit Profile Details Modal */}
       {isEditing && (
         <div className="fixed inset-0 z-50 bg-ink/70 flex items-center justify-center p-4">
           <div className="comic-box-lg max-w-md w-full bg-cream p-6 animate-in fade-in">
@@ -271,73 +326,33 @@ export const Profile = () => {
                 required
               />
 
-              <div className="grid grid-cols-2 gap-3 text-left">
-                <div>
-                  <label className="font-comic text-xs uppercase tracking-wide text-ink block mb-1">
-                    SEMESTER
-                  </label>
-                  <select
-                    value={semester}
-                    onChange={(e) => setSemester(e.target.value)}
-                    className="comic-input text-xs py-2 bg-white"
-                  >
-                    {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => (
-                      <option key={s} value={s}>
-                        Semester {s}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="font-comic text-xs uppercase tracking-wide text-ink block mb-1">
-                    DEPARTMENT
-                  </label>
-                  <select
-                    value={department}
-                    onChange={(e) => setDepartment(e.target.value)}
-                    className="comic-input text-xs py-2 bg-white"
-                  >
-                    {[
-                      'Computer Science',
-                      'Information Tech',
-                      'Data Science',
-                      'AI & ML',
-                      'Electronics',
-                    ].map((d) => (
-                      <option key={d} value={d}>
-                        {d}
-                      </option>
-                    ))}
-                  </select>
+              {/* Current Academic Batch Tag */}
+              <div className="comic-box-sm bg-white p-3 border-2 border-ink space-y-1">
+                <span className="font-comic text-[10px] uppercase text-olive-dark block font-bold">
+                  VERIFIED ACADEMIC COHORT
+                </span>
+                <div className="flex items-center justify-between">
+                  <span className="font-heading text-sm text-ink uppercase">
+                    {p.department || 'AI & ML'} • Sem {p.semester || 5}
+                  </span>
+                  {p.role !== 'admin' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditing(false);
+                        setTransferDept(p.department || 'AI & ML');
+                        setTransferSem(p.semester || 5);
+                        setTransferReason('Branch Transfer (College Approved)');
+                        setTransferCustomNote('');
+                        setIsTransferModalOpen(true);
+                      }}
+                      className="text-[11px] font-comic uppercase text-punch-red underline font-bold hover:text-ink cursor-pointer flex items-center gap-1"
+                    >
+                      <ArrowLeftRight className="w-3 h-3" /> Change
+                    </button>
+                  )}
                 </div>
               </div>
-
-              {/* Notice if Department or Semester was modified */}
-              {p.role !== 'admin' && (department !== p.department || parseInt(semester, 10) !== parseInt(p.semester, 10)) && (
-                <div className="comic-box-sm bg-comic-yellow/30 border-2 border-ink p-3 space-y-2">
-                  <div className="flex items-center gap-1.5 text-punch-red font-comic text-xs uppercase font-bold">
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>REQUIRES ADMIN APPROVAL</span>
-                  </div>
-                  <p className="font-sans text-[11px] text-ink/80 leading-snug">
-                    Department and Semester changes are verified by administrators to prevent unauthorized access. Once approved, your content vault will switch.
-                  </p>
-                  <div>
-                    <label className="font-comic text-[10px] uppercase text-ink block mb-1">
-                      REASON FOR TRANSFER (REQUIRED):
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Transferred branch / Promoted to next sem"
-                      value={changeReason}
-                      onChange={(e) => setChangeReason(e.target.value)}
-                      className="comic-input text-xs py-1.5 bg-white"
-                    />
-                  </div>
-                </div>
-              )}
 
               <ComicInput
                 label="Personal Bio / Exam Target"
@@ -358,6 +373,145 @@ export const Profile = () => {
                 </button>
                 <ComicButton type="submit" variant="yellow" size="sm" loading={saving}>
                   SAVE CHANGES
+                </ComicButton>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Dedicated Academic Transfer Request Modal */}
+      {isTransferModalOpen && (
+        <div className="fixed inset-0 z-50 bg-ink/70 flex items-center justify-center p-4">
+          <div className="comic-box-lg max-w-md w-full bg-cream p-6 animate-in fade-in">
+            <div className="flex items-center gap-2 mb-2 pb-2 border-b-2 border-ink/20">
+              <ArrowLeftRight className="w-6 h-6 text-punch-red" />
+              <h3 className="font-heading text-2xl uppercase tracking-wide text-ink">
+                REQUEST ACADEMIC TRANSFER
+              </h3>
+            </div>
+            <p className="font-sans text-xs text-olive-dark mb-4">
+              Select your new department and semester below. An administrator will verify and approve your transfer so your Question Banks and MCQ battles switch to your new syllabus.
+            </p>
+
+            <form onSubmit={handleRequestTransfer} className="space-y-4">
+              {/* Current Active Cohort */}
+              <div className="comic-box-sm bg-white p-3 border-2 border-ink flex items-center justify-between text-xs font-mono">
+                <span className="text-olive-dark uppercase font-bold">CURRENT BATCH:</span>
+                <span className="bg-cream font-bold px-2 py-0.5 border border-ink rounded text-ink">
+                  {p.department || 'AI & ML'} • Sem {p.semester || 5}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-left">
+                <div>
+                  <label className="font-comic text-xs uppercase tracking-wide text-ink block mb-1">
+                    NEW DEPARTMENT
+                  </label>
+                  <select
+                    value={transferDept}
+                    onChange={(e) => setTransferDept(e.target.value)}
+                    className="comic-input text-xs py-2 bg-white"
+                  >
+                    {[
+                      'AI & ML',
+                      'Computer Science',
+                      'Information Tech',
+                      'Data Science',
+                      'Electronics',
+                      'Computer Engineering',
+                    ].map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="font-comic text-xs uppercase tracking-wide text-ink block mb-1">
+                    NEW SEMESTER
+                  </label>
+                  <select
+                    value={transferSem}
+                    onChange={(e) => setTransferSem(e.target.value)}
+                    className="comic-input text-xs py-2 bg-white"
+                  >
+                    {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => (
+                      <option key={s} value={s}>
+                        Semester {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Transfer Reason Dropdown */}
+              <div>
+                <label className="font-comic text-xs uppercase tracking-wide text-ink block mb-1">
+                  REASON FOR TRANSFER
+                </label>
+                <select
+                  value={transferReason}
+                  onChange={(e) => setTransferReason(e.target.value)}
+                  className="comic-input text-xs py-2 bg-white"
+                >
+                  <option value="Branch Transfer (College Approved)">
+                    Branch Transfer (College Approved)
+                  </option>
+                  <option value="Promoted to Next Semester">
+                    Promoted to Next Semester
+                  </option>
+                  <option value="Selected Wrong Department During Registration">
+                    Selected Wrong Department During Registration
+                  </option>
+                  <option value="Direct Second Year (DSE) Lateral Entry">
+                    Direct Second Year (DSE) Lateral Entry
+                  </option>
+                  <option value="Other Reason (Specify below)">
+                    Other Reason (Specify below)
+                  </option>
+                </select>
+              </div>
+
+              {transferReason === 'Other Reason (Specify below)' && (
+                <div>
+                  <label className="font-comic text-[11px] uppercase text-ink block mb-1">
+                    ADDITIONAL NOTE (OPTIONAL)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Briefly state your transfer reason..."
+                    value={transferCustomNote}
+                    onChange={(e) => setTransferCustomNote(e.target.value)}
+                    className="comic-input text-xs py-1.5 bg-white"
+                  />
+                </div>
+              )}
+
+              <div className="comic-box-sm bg-comic-yellow/30 border-2 border-ink p-2.5 text-[11px] font-sans text-ink/80 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-punch-red flex-shrink-0" />
+                <span>
+                  Admin will review this request. You will receive an in-app alert upon approval.
+                </span>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsTransferModalOpen(false)}
+                  className="comic-btn comic-btn-white text-sm"
+                >
+                  CANCEL
+                </button>
+                <ComicButton
+                  type="submit"
+                  variant="yellow"
+                  size="sm"
+                  loading={submittingTransfer}
+                  icon={<ArrowLeftRight className="w-3.5 h-3.5" />}
+                >
+                  SUBMIT TRANSFER REQUEST
                 </ComicButton>
               </div>
             </form>

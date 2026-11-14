@@ -30,3 +30,4 @@ const { getDb } = require('../server/database/db');
     process.exit(1);
   }
 })();
+

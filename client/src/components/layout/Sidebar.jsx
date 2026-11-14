@@ -23,6 +23,7 @@ import {
   LogOut,
   X,
   Sparkles,
+  ArrowLeftRight,
 } from 'lucide-react';
 
 export const Sidebar = ({ isOpen, onClose }) => {
@@ -51,6 +52,7 @@ export const Sidebar = ({ isOpen, onClose }) => {
   const adminLinks = [
     { to: '/admin', label: 'Admin HQ', icon: Shield },
     { to: '/admin/mcq-generator', label: 'AI MCQ Generator', icon: Sparkles, badge: 'NEW' },
+    { to: '/admin/dept-requests', label: 'Dept Requests', icon: ArrowLeftRight, badge: 'REQ' },
     { to: '/admin/registrations', label: 'Pending Recruits', icon: UserCog, badge: 'REQ' },
     { to: '/admin/students', label: 'Manage Students', icon: Users },
     { to: '/admin/documents', label: 'Vault / Uploads', icon: Upload },

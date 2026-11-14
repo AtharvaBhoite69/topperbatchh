@@ -59,6 +59,18 @@ const upload = multer({
 // All document routes require authentication
 router.use(authenticate);
 
+function normalizeDept(dept) {
+  if (!dept) return '';
+  const d = String(dept).trim().toUpperCase();
+  if (d === 'AIML' || d === 'AI&ML' || d === 'AI & ML' || d === 'AI AND ML') return 'AI & ML';
+  if (d === 'CS' || d === 'CSE' || d === 'COMPUTER SCIENCE') return 'Computer Science';
+  if (d === 'IT' || d === 'INFORMATION TECH' || d === 'INFORMATION TECHNOLOGY') return 'Information Tech';
+  if (d === 'DS' || d === 'DATA SCIENCE') return 'Data Science';
+  if (d === 'EXTC' || d === 'ELECTRONICS') return 'Electronics';
+  if (d === 'CE' || d === 'COMPUTER ENGINEERING') return 'Computer Engineering';
+  return dept;
+}
+
 // =============================================================================
 // Student Routes (Approved & Admin)
 // =============================================================================
@@ -84,8 +96,9 @@ router.get('/', requireApproved, async (req, res, next) => {
         params.push(req.user.semester);
       }
       if (req.user.department) {
-        whereConditions.push('(d.department = ? OR d.department IS NULL)');
-        params.push(req.user.department);
+        const normDept = normalizeDept(req.user.department);
+        whereConditions.push('(d.department = ? OR d.department = ? OR d.department IS NULL)');
+        params.push(normDept, req.user.department);
       }
     } else {
       // Admins have unrestricted access and can filter by any semester or department
@@ -170,8 +183,9 @@ router.get('/subjects', requireApproved, async (req, res, next) => {
         params.push(req.user.semester);
       }
       if (req.user.department) {
-        whereConditions.push('(department = ? OR department IS NULL)');
-        params.push(req.user.department);
+        const normDept = normalizeDept(req.user.department);
+        whereConditions.push('(department = ? OR department = ? OR department IS NULL)');
+        params.push(normDept, req.user.department);
       }
     } else {
       if (semester_id) {
@@ -280,7 +294,7 @@ router.get('/:id', requireApproved, async (req, res, next) => {
       if (doc.semester_id && req.user.semester && doc.semester_id !== req.user.semester) {
         return res.status(403).json({ error: 'Access denied: This material belongs to a different semester.' });
       }
-      if (doc.department && req.user.department && doc.department.trim().toLowerCase() !== req.user.department.trim().toLowerCase()) {
+      if (doc.department && req.user.department && normalizeDept(doc.department) !== normalizeDept(req.user.department)) {
         return res.status(403).json({ error: 'Access denied: This material belongs to a different department.' });
       }
     }
@@ -314,7 +328,7 @@ router.get('/:id/view', requireApproved, async (req, res, next) => {
       if (doc.semester_id && req.user.semester && doc.semester_id !== req.user.semester) {
         return res.status(403).json({ error: 'Access denied: This material belongs to a different semester.' });
       }
-      if (doc.department && req.user.department && doc.department.trim().toLowerCase() !== req.user.department.trim().toLowerCase()) {
+      if (doc.department && req.user.department && normalizeDept(doc.department) !== normalizeDept(req.user.department)) {
         return res.status(403).json({ error: 'Access denied: This material belongs to a different department.' });
       }
     }
