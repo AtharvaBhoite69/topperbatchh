@@ -29,6 +29,7 @@ const profileRoutes = require('./routes/profile');
 const notificationsRoutes = require('./routes/notifications');
 const searchRoutes = require('./routes/search');
 const mcqGeneratorRoutes = require('./routes/mcqGenerator');
+const calendarRoutes = require('./routes/calendar');
 
 // Validate environment
 env.validateEnv();
@@ -89,6 +90,7 @@ app.use(['/api/community', '/community'], communityRoutes);
 app.use(['/api/profile', '/profile'], profileRoutes);
 app.use(['/api/notifications', '/notifications'], notificationsRoutes);
 app.use(['/api/search', '/search'], searchRoutes);
+app.use(['/api/calendar', '/calendar'], calendarRoutes);
 
 // Health check endpoint
 app.get(['/api/health', '/health'], (req, res) => {

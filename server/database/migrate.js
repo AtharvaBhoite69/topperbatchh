@@ -439,6 +439,28 @@ function runMigrations() {
       created_at TEXT DEFAULT (datetime('now')),
       resolved_at TEXT
     );
+
+    -- =========================================================================
+    -- Exam Calendar Events (Department & Semester Timetable)
+    -- =========================================================================
+    CREATE TABLE IF NOT EXISTS exam_calendar_events (
+      id TEXT PRIMARY KEY,
+      department TEXT NOT NULL,
+      semester INTEGER NOT NULL,
+      subject TEXT NOT NULL,
+      short_subject TEXT,
+      paper_code TEXT,
+      exam_date TEXT NOT NULL,
+      start_time TEXT DEFAULT '02:30 PM',
+      end_time TEXT DEFAULT '04:30 PM',
+      reporting_time TEXT DEFAULT '02:00 PM',
+      duration TEXT DEFAULT '2 Hours (120 Mins)',
+      category TEXT DEFAULT 'Core Course (PCC)',
+      accent TEXT DEFAULT 'yellow',
+      created_by TEXT REFERENCES users(id),
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   // =========================================================================
@@ -472,6 +494,8 @@ function runMigrations() {
     'CREATE INDEX IF NOT EXISTS idx_dept_requests_status ON department_change_requests(status)',
     'CREATE INDEX IF NOT EXISTS idx_documents_dept ON documents(department)',
     'CREATE INDEX IF NOT EXISTS idx_mcq_challenges_dept_sem ON mcq_challenges(department, semester)',
+    'CREATE INDEX IF NOT EXISTS idx_calendar_dept_sem ON exam_calendar_events(department, semester)',
+    'CREATE INDEX IF NOT EXISTS idx_calendar_date ON exam_calendar_events(exam_date)',
   ];
 
   for (const idx of indexes) {

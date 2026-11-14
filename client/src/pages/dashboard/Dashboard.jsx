@@ -123,12 +123,12 @@ export const Dashboard = () => {
       badge: 'TOP 3',
     },
     {
-      title: 'AIML EXAM CALENDAR',
-      desc: 'Official MU Winter 2026 Sem V Timetable (5 Papers)',
+      title: 'EXAM CALENDAR',
+      desc: 'Official semester exam timetable & paper schedules',
       icon: Calendar,
       to: '/exam-planner',
       accent: 'red',
-      badge: 'NOV 2026',
+      badge: 'SCHEDULE',
     },
     {
       title: 'MY PROFILE',

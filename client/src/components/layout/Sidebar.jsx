@@ -44,7 +44,7 @@ export const Sidebar = ({ isOpen, onClose }) => {
     { to: '/community', label: 'Community Chat', icon: MessageCircle },
     { to: '/leaderboard', label: 'Leaderboard', icon: Trophy },
     { to: '/study-groups', label: 'Study Groups', icon: Users },
-    { to: '/exam-planner', label: 'AIML Exam Calendar', icon: Calendar, badge: '5 EXAMS' },
+    { to: '/exam-planner', label: 'Exam Calendar', icon: Calendar, badge: 'EXAM' },
     { to: '/profile', label: 'My Profile', icon: User },
     { to: '/notifications', label: 'Notifications', icon: Bell },
   ];
@@ -58,6 +58,7 @@ export const Sidebar = ({ isOpen, onClose }) => {
     { to: '/admin/documents', label: 'Vault / Uploads', icon: Upload },
     { to: '/admin/questions', label: 'MCQ Forge', icon: ListChecks },
     { to: '/admin/challenges', label: 'Battle Planner', icon: Zap },
+    { to: '/exam-planner', label: 'Exam Timetable', icon: Calendar, badge: 'EDIT' },
     { to: '/admin/announcements', label: 'Megaphone', icon: Megaphone },
     { to: '/admin/settings', label: 'Control Room', icon: Settings, badge: '🔒' },
   ];
