@@ -18,6 +18,17 @@ router.use(authenticate);
 
 const IST_OFFSET_MS = 330 * 60 * 1000;
 
+function normalizeDept(dept) {
+  if (!dept) return '';
+  const d = String(dept).trim().toUpperCase();
+  if (d === 'AIML' || d === 'AI&ML' || d === 'AI & ML' || d === 'AI AND ML') return 'AI & ML';
+  if (d === 'CS' || d === 'CSE' || d === 'COMPUTER SCIENCE') return 'Computer Science';
+  if (d === 'IT' || d === 'INFORMATION TECH' || d === 'INFORMATION TECHNOLOGY') return 'Information Tech';
+  if (d === 'DS' || d === 'DATA SCIENCE') return 'Data Science';
+  if (d === 'EXTC' || d === 'ELECTRONICS') return 'Electronics';
+  return dept;
+}
+
 function formatSqlUtc(date) {
   return date.toISOString().slice(0, 19).replace('T', ' ');
 }
@@ -103,22 +114,23 @@ router.get('/daily', requireApproved, async (req, res, next) => {
     let challengeParams = [cutoff530Pm, today];
 
     if (req.user.role === 'student') {
-      if (req.user.department) {
-        challengeQuery += ' AND (c.department IS NULL OR c.department = ?)';
-        challengeParams.push(req.user.department);
-      }
-      if (req.user.semester) {
-        challengeQuery += ' AND (c.semester IS NULL OR c.semester = ?)';
-        challengeParams.push(req.user.semester);
+      const userDept = normalizeDept(req.user.department);
+      const userSem = parseInt(req.user.semester, 10);
+      challengeQuery += ' AND (c.department = ? OR c.department = ?)';
+      challengeParams.push(userDept, req.user.department || '');
+      if (userSem) {
+        challengeQuery += ' AND c.semester = ?';
+        challengeParams.push(userSem);
       }
     } else {
       const { department, semester } = req.query;
       if (department) {
-        challengeQuery += ' AND (c.department IS NULL OR c.department = ?)';
-        challengeParams.push(department);
+        const normDept = normalizeDept(department);
+        challengeQuery += ' AND (c.department = ? OR c.department = ?)';
+        challengeParams.push(normDept, department);
       }
       if (semester) {
-        challengeQuery += ' AND (c.semester IS NULL OR c.semester = ?)';
+        challengeQuery += ' AND c.semester = ?';
         challengeParams.push(parseInt(semester, 10));
       }
     }
@@ -170,6 +182,8 @@ router.get('/daily', requireApproved, async (req, res, next) => {
         id: challenge.id,
         title: challenge.title,
         description: challenge.description,
+        department: challenge.department,
+        semester: challenge.semester,
         subject_name: challenge.subject_name,
         duration_minutes: challenge.duration_minutes,
         scoring_correct: challenge.scoring_correct,
@@ -220,10 +234,15 @@ async function handleStartAttempt(req, res, next) {
 
     // Strict Department & Semester verification for students
     if (req.user.role === 'student') {
-      if (challenge.semester && req.user.semester && challenge.semester !== req.user.semester) {
+      const userDept = normalizeDept(req.user.department);
+      const chDept = normalizeDept(challenge.department);
+      const userSem = parseInt(req.user.semester, 10);
+      const chSem = parseInt(challenge.semester, 10);
+
+      if (chSem && userSem && chSem !== userSem) {
         return res.status(403).json({ error: `Access denied: This battle is designated for Semester ${challenge.semester}.` });
       }
-      if (challenge.department && req.user.department && challenge.department.trim().toLowerCase() !== req.user.department.trim().toLowerCase()) {
+      if (chDept && userDept && chDept !== userDept) {
         return res.status(403).json({ error: `Access denied: This battle is designated for ${challenge.department}.` });
       }
     }
@@ -636,21 +655,57 @@ router.get('/daily/history', requireApproved, async (req, res, next) => {
   try {
     const db = getDb();
     await expireOldChallenges(db);
-    const activeChallenge = await db.prepare(
-      'SELECT id FROM mcq_challenges WHERE is_active = 1 ORDER BY created_at DESC LIMIT 1'
-    ).get();
+
+    let activeQuery = 'SELECT id FROM mcq_challenges WHERE is_active = 1';
+    let activeParams = [];
+    if (req.user.role === 'student') {
+      const userDept = normalizeDept(req.user.department);
+      const userSem = parseInt(req.user.semester, 10);
+      activeQuery += ' AND (department = ? OR department = ?)';
+      activeParams.push(userDept, req.user.department || '');
+      if (userSem) {
+        activeQuery += ' AND semester = ?';
+        activeParams.push(userSem);
+      }
+    }
+    activeQuery += ' ORDER BY created_at DESC LIMIT 1';
+    const activeChallenge = await db.prepare(activeQuery).get(...activeParams);
     const activeId = activeChallenge?.id || '';
 
-    const history = await db.prepare(`
-      SELECT c.id, c.title, c.challenge_date, s.name as subject_name,
+    let historyQuery = `
+      SELECT c.id, c.title, c.challenge_date, c.department, c.semester, s.name as subject_name,
              qa.score, qa.total_correct, qa.time_taken_seconds, qa.submitted_at
       FROM mcq_challenges c
       LEFT JOIN subjects s ON c.subject_id = s.id
       LEFT JOIN quiz_attempts qa ON qa.challenge_id = c.id AND qa.user_id = ?
       WHERE c.is_published = 1 AND c.is_active = 0 AND c.id != ?
-      ORDER BY c.challenge_date DESC, c.created_at DESC
-      LIMIT 20
-    `).all(req.user.id, activeId);
+    `;
+    let historyParams = [req.user.id, activeId];
+
+    if (req.user.role === 'student') {
+      const userDept = normalizeDept(req.user.department);
+      const userSem = parseInt(req.user.semester, 10);
+      historyQuery += ' AND (c.department = ? OR c.department = ?)';
+      historyParams.push(userDept, req.user.department || '');
+      if (userSem) {
+        historyQuery += ' AND c.semester = ?';
+        historyParams.push(userSem);
+      }
+    } else {
+      const { department, semester } = req.query;
+      if (department) {
+        const normDept = normalizeDept(department);
+        historyQuery += ' AND (c.department = ? OR c.department = ?)';
+        historyParams.push(normDept, department);
+      }
+      if (semester) {
+        historyQuery += ' AND c.semester = ?';
+        historyParams.push(parseInt(semester, 10));
+      }
+    }
+
+    historyQuery += ' ORDER BY c.challenge_date DESC, c.created_at DESC LIMIT 20';
+    const history = await db.prepare(historyQuery).all(...historyParams);
     return res.status(200).json({ success: true, history });
   } catch (err) {
     next(err);

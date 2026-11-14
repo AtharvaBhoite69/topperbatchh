@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import ComicButton from '../../components/ui/ComicButton';
 import ComicCard from '../../components/ui/ComicCard';
 import { ComicBadge, EmptyState, LoadingSkeleton } from '../../components/ui/ComicElements';
 import { quiz as quizApi } from '../../services/api';
-import { Zap, Clock, Trophy, Award, CheckCircle2, ArrowRight, Play, BookOpen } from 'lucide-react';
+import { Zap, Clock, Trophy, Award, CheckCircle2, ArrowRight, Play, BookOpen, Shield } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 function getCountdownParts(expiresAt) {
@@ -26,6 +27,7 @@ function getCountdownParts(expiresAt) {
 
 export const DailyChallenge = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [dailyData, setDailyData] = useState(null);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -115,6 +117,24 @@ export const DailyChallenge = () => {
             10 randomized syllabus questions every day. One official attempt per student.
             Climb the batch leaderboard, build your daily study streak, and sharpen exam readiness.
           </p>
+
+          {user?.role === 'admin' ? (
+            <div className="flex items-center gap-2 mt-3">
+              <span className="font-comic text-[11px] bg-punch-red text-cream px-2.5 py-1 rounded border-2 border-ink shadow-[2px_2px_0px_#171510] font-bold flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5" />
+                ADMIN OVERDRIVE: ALL COMPETITIONS & MULTI-DEPT ACCESS
+              </span>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              <span className="font-comic text-[11px] bg-comic-yellow text-ink px-2.5 py-1 rounded border-2 border-ink shadow-[2px_2px_0px_#171510] font-bold">
+                🎯 DEDICATED COHORT: {user?.department || 'AI & ML'} • SEMESTER {user?.semester || 5}
+              </span>
+              <span className="font-sans text-[11px] text-olive-dark font-medium">
+                Active battle & competition history tailored strictly for your syllabus.
+              </span>
+            </div>
+          )}
         </div>
 
         <Link to="/leaderboard">
@@ -138,6 +158,9 @@ export const DailyChallenge = () => {
                 <ComicBadge variant="yellow">
                   {challenge.subject_name || 'All-Subject Mixed'}
                 </ComicBadge>
+                <span className="font-mono text-xs bg-white px-2 py-0.5 border border-ink rounded font-bold">
+                  {challenge.department || 'AI & ML'} • Sem {challenge.semester || 5}
+                </span>
                 <span className="font-mono text-xs bg-white px-2 py-0.5 border border-ink rounded">
                   {challenge.total_questions || 10} QUESTIONS
                 </span>
@@ -301,15 +324,20 @@ export const DailyChallenge = () => {
               .map((h) => (
               <ComicCard key={h.id} accent="olive" className="bg-white p-4">
                 <div className="flex justify-between items-start mb-2">
-                  <span className="font-mono text-[10px] text-ink/70">
-                    {h.challenge_date
-                      ? new Date(h.challenge_date).toLocaleDateString('en-IN', {
-                          day: 'numeric',
-                          month: 'short',
-                          year: 'numeric',
-                        })
-                      : ''}
-                  </span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-mono text-[10px] text-ink/70">
+                      {h.challenge_date
+                        ? new Date(h.challenge_date).toLocaleDateString('en-IN', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                          })
+                        : ''}
+                    </span>
+                    <span className="font-mono text-[9px] bg-comic-yellow text-ink px-1.5 py-0.2 rounded border border-ink font-bold">
+                      {h.department || 'AI & ML'} • Sem {h.semester || 5}
+                    </span>
+                  </div>
                   {h.score !== null ? (
                     <span className="font-comic text-[11px] bg-victory-green text-cream px-1.5 py-0.5 rounded border border-ink">
                       {h.score} PTS

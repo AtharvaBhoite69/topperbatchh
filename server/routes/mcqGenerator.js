@@ -25,7 +25,7 @@ try {
   if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
   }
-} catch (_) {}
+} catch (_) { }
 
 /**
  * Resolve a Vault document's text/file for MCQ generation across Vercel cold starts:
@@ -55,7 +55,7 @@ async function resolveVaultDocumentSource(db, docId) {
         filePath: null,
       };
     }
-  } catch (_) {}
+  } catch (_) { }
 
   // 2. Check local disk / /tmp cache
   const localPath = path.join(uploadDir, doc.filename);
@@ -236,7 +236,7 @@ router.post('/regenerate-question', async (req, res, next) => {
         if (files.length > 0) {
           filePath = path.join(uploadDir, files[files.length - 1]);
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     if (!preExtractedPages && (!filePath || !fs.existsSync(filePath))) {
