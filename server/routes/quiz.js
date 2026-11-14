@@ -93,15 +93,38 @@ router.get('/daily', requireApproved, async (req, res, next) => {
     const today = new Date().toISOString().split('T')[0];
     const cutoff530Pm = await expireOldChallenges(db);
 
-    // Find active challenge for the current 5:30 PM IST cycle
-    let challenge = await db.prepare(`
+    // Find active challenge for the current 5:30 PM IST cycle, matching student department & semester
+    let challengeQuery = `
       SELECT c.*, s.name as subject_name
       FROM mcq_challenges c
       LEFT JOIN subjects s ON c.subject_id = s.id
       WHERE c.is_active = 1 AND c.created_at >= ? AND c.challenge_date <= ?
-      ORDER BY c.created_at DESC
-      LIMIT 1
-    `).get(cutoff530Pm, today);
+    `;
+    let challengeParams = [cutoff530Pm, today];
+
+    if (req.user.role === 'student') {
+      if (req.user.department) {
+        challengeQuery += ' AND (c.department IS NULL OR c.department = ?)';
+        challengeParams.push(req.user.department);
+      }
+      if (req.user.semester) {
+        challengeQuery += ' AND (c.semester IS NULL OR c.semester = ?)';
+        challengeParams.push(req.user.semester);
+      }
+    } else {
+      const { department, semester } = req.query;
+      if (department) {
+        challengeQuery += ' AND (c.department IS NULL OR c.department = ?)';
+        challengeParams.push(department);
+      }
+      if (semester) {
+        challengeQuery += ' AND (c.semester IS NULL OR c.semester = ?)';
+        challengeParams.push(parseInt(semester, 10));
+      }
+    }
+
+    challengeQuery += ' ORDER BY c.created_at DESC LIMIT 1';
+    let challenge = await db.prepare(challengeQuery).get(...challengeParams);
 
     if (!challenge) {
       return res.status(200).json({
@@ -193,6 +216,16 @@ async function handleStartAttempt(req, res, next) {
     if (isChallengeExpired(challenge)) {
       await db.prepare('UPDATE mcq_challenges SET is_active = 0 WHERE id = ?').run(challenge.id);
       return res.status(400).json({ error: 'This daily quiz has ended (5:30 PM IST deadline reached).' });
+    }
+
+    // Strict Department & Semester verification for students
+    if (req.user.role === 'student') {
+      if (challenge.semester && req.user.semester && challenge.semester !== req.user.semester) {
+        return res.status(403).json({ error: `Access denied: This battle is designated for Semester ${challenge.semester}.` });
+      }
+      if (challenge.department && req.user.department && challenge.department.trim().toLowerCase() !== req.user.department.trim().toLowerCase()) {
+        return res.status(403).json({ error: `Access denied: This battle is designated for ${challenge.department}.` });
+      }
     }
 
     // Check existing attempt
@@ -741,6 +774,8 @@ router.post('/challenges', requireAdmin, async (req, res, next) => {
       title,
       description,
       subject_id,
+      department,
+      semester,
       challenge_date,
       duration_minutes = 15,
       scoring_correct = 10,
@@ -757,14 +792,16 @@ router.post('/challenges', requireAdmin, async (req, res, next) => {
 
     await db.prepare(`
       INSERT INTO mcq_challenges (
-        id, title, description, subject_id, challenge_date, duration_minutes,
+        id, title, description, subject_id, department, semester, challenge_date, duration_minutes,
         scoring_correct, participation_bonus, is_active, is_published, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?)
     `).run(
       challengeId,
       title.trim(),
       description || null,
       subject_id || null,
+      department ? department.trim() : null,
+      semester ? parseInt(semester, 10) : null,
       challenge_date,
       duration_minutes,
       scoring_correct,
@@ -785,6 +822,59 @@ router.post('/challenges', requireAdmin, async (req, res, next) => {
       message: 'Competition challenge scheduled!',
       challengeId,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * PUT /api/quiz/challenges/:id (Admin)
+ */
+router.put('/challenges/:id', requireAdmin, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const {
+      title,
+      description,
+      subject_id,
+      department,
+      semester,
+      challenge_date,
+      duration_minutes,
+      scoring_correct,
+      participation_bonus,
+      is_active,
+    } = req.body;
+
+    const db = getDb();
+    await db.prepare(`
+      UPDATE mcq_challenges
+      SET title = COALESCE(?, title),
+          description = COALESCE(?, description),
+          subject_id = COALESCE(?, subject_id),
+          department = COALESCE(?, department),
+          semester = COALESCE(?, semester),
+          challenge_date = COALESCE(?, challenge_date),
+          duration_minutes = COALESCE(?, duration_minutes),
+          scoring_correct = COALESCE(?, scoring_correct),
+          participation_bonus = COALESCE(?, participation_bonus),
+          is_active = COALESCE(?, is_active)
+      WHERE id = ?
+    `).run(
+      title ? title.trim() : null,
+      description !== undefined ? description : null,
+      subject_id !== undefined ? subject_id : null,
+      department !== undefined ? (department ? department.trim() : null) : null,
+      semester !== undefined ? (semester ? parseInt(semester, 10) : null) : null,
+      challenge_date || null,
+      duration_minutes ? parseInt(duration_minutes, 10) : null,
+      scoring_correct ? parseInt(scoring_correct, 10) : null,
+      participation_bonus ? parseInt(participation_bonus, 10) : null,
+      is_active !== undefined ? (is_active ? 1 : 0) : null,
+      id
+    );
+
+    return res.status(200).json({ success: true, message: 'Challenge updated successfully.' });
   } catch (err) {
     next(err);
   }

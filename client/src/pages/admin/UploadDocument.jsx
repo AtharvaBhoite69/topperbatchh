@@ -11,6 +11,7 @@ export const UploadDocument = () => {
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [department, setDepartment] = useState('Computer Science');
   const [semesterId, setSemesterId] = useState(3);
   const [subjectId, setSubjectId] = useState('');
   const [topic, setTopic] = useState('');
@@ -68,6 +69,9 @@ export const UploadDocument = () => {
     formData.append('title', title.trim());
     formData.append('description', description.trim());
     formData.append('semester_id', semesterId);
+    if (department && department !== 'All') {
+      formData.append('department', department);
+    }
     if (subjectId) formData.append('subject_id', subjectId);
     if (topic) formData.append('topic', topic.trim());
 
@@ -154,7 +158,31 @@ export const UploadDocument = () => {
             onChange={(e) => setDescription(e.target.value)}
           />
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="font-comic text-xs uppercase tracking-wide text-ink block mb-1">
+                DEPARTMENT
+              </label>
+              <select
+                value={department}
+                onChange={(e) => setDepartment(e.target.value)}
+                className="comic-input text-xs py-2 bg-white"
+              >
+                {[
+                  'Computer Science',
+                  'Information Tech',
+                  'Data Science',
+                  'AI & ML',
+                  'Electronics',
+                  'All Departments (Common)',
+                ].map((d) => (
+                  <option key={d} value={d === 'All Departments (Common)' ? 'All' : d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div>
               <label className="font-comic text-xs uppercase tracking-wide text-ink block mb-1">
                 SEMESTER

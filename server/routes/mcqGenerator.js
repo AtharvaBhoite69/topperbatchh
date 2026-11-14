@@ -370,6 +370,8 @@ router.post('/publish', async (req, res, next) => {
       durationMinutes = 15,
       scoringCorrect = 10,
       subjectId = null,
+      department = null,
+      semester = null,
       approvedQuestions = [],
     } = req.body;
 
@@ -392,15 +394,17 @@ router.post('/publish', async (req, res, next) => {
 
       await db.prepare(`
         INSERT INTO mcq_challenges (
-          id, title, description, subject_id, challenge_date,
+          id, title, description, subject_id, department, semester, challenge_date,
           duration_minutes, question_count, is_active, is_published,
           scoring_correct, created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?)
       `).run(
         challengeId,
         title,
         null,
         subjectId || null,
+        department ? department.trim() : null,
+        semester ? parseInt(semester, 10) : null,
         targetDate,
         parseInt(durationMinutes, 10) || 15,
         approvedQuestions.length,

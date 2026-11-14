@@ -419,6 +419,24 @@ function runMigrations() {
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
+
+    -- =========================================================================
+    -- Department & Semester Change Requests
+    -- =========================================================================
+    CREATE TABLE IF NOT EXISTS department_change_requests (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      current_department TEXT,
+      current_semester INTEGER,
+      requested_department TEXT NOT NULL,
+      requested_semester INTEGER NOT NULL,
+      reason TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
+      admin_id TEXT REFERENCES users(id),
+      admin_notes TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      resolved_at TEXT
+    );
   `);
 
   // =========================================================================
@@ -448,6 +466,10 @@ function runMigrations() {
     'CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)',
     'CREATE INDEX IF NOT EXISTS idx_email_verifications_email ON email_verifications(email)',
     'CREATE INDEX IF NOT EXISTS idx_mcq_draft_sessions_admin ON mcq_draft_sessions(admin_id)',
+    'CREATE INDEX IF NOT EXISTS idx_dept_requests_user ON department_change_requests(user_id)',
+    'CREATE INDEX IF NOT EXISTS idx_dept_requests_status ON department_change_requests(status)',
+    'CREATE INDEX IF NOT EXISTS idx_documents_dept ON documents(department)',
+    'CREATE INDEX IF NOT EXISTS idx_mcq_challenges_dept_sem ON mcq_challenges(department, semester)',
   ];
 
   for (const idx of indexes) {
@@ -463,6 +485,12 @@ function runMigrations() {
   try { db.exec('ALTER TABLE questions ADD COLUMN page_number INTEGER'); } catch (_) {}
   try { db.exec('ALTER TABLE questions ADD COLUMN topic TEXT'); } catch (_) {}
   try { db.exec('ALTER TABLE questions ADD COLUMN source_pdf_name TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE documents ADD COLUMN department TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE subjects ADD COLUMN department TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE mcq_challenges ADD COLUMN department TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE mcq_challenges ADD COLUMN semester INTEGER'); } catch (_) {}
+  try { db.exec('ALTER TABLE community_channels ADD COLUMN department TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE community_channels ADD COLUMN semester INTEGER'); } catch (_) {}
 
   console.log('✅ Database migrations completed successfully.');
 }

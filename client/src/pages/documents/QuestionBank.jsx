@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import ComicCard from '../../components/ui/ComicCard';
 import ComicButton from '../../components/ui/ComicButton';
 import ComicInput from '../../components/ui/ComicInput';
 import { ComicBadge, EmptyState, LoadingSkeleton } from '../../components/ui/ComicElements';
 import { documents as docApi } from '../../services/api';
-import { BookOpen, Search, Bookmark, Bot, Eye, Calendar, FileText, Check } from 'lucide-react';
+import { BookOpen, Search, Bookmark, Bot, Eye, Calendar, FileText, Check, Shield } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const QuestionBank = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [documents, setDocuments] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [semesters, setSemesters] = useState([]);
@@ -17,6 +19,7 @@ export const QuestionBank = () => {
 
   // Filters
   const [search, setSearch] = useState('');
+  const [selectedDepartment, setSelectedDepartment] = useState('');
   const [selectedSemester, setSelectedSemester] = useState('');
   const [selectedSubject, setSelectedSubject] = useState('');
   const [page, setPage] = useState(1);
@@ -46,7 +49,8 @@ export const QuestionBank = () => {
       try {
         const res = await docApi.list({
           search,
-          semester: selectedSemester,
+          department: user?.role === 'admin' ? selectedDepartment : undefined,
+          semester: user?.role === 'admin' ? selectedSemester : undefined,
           subject_id: selectedSubject,
           page,
           limit: 12,
@@ -64,7 +68,7 @@ export const QuestionBank = () => {
     };
 
     fetchDocs();
-  }, [search, selectedSemester, selectedSubject, page]);
+  }, [search, selectedDepartment, selectedSemester, selectedSubject, page, user]);
 
   const handleToggleSave = async (docId, isCurrentlySaved) => {
     try {
@@ -99,6 +103,24 @@ export const QuestionBank = () => {
             Verified study materials, previous question papers, and high-yield notes.
             Open any document to study in our protected viewer or ask AI instant questions with page references.
           </p>
+
+          {user?.role === 'admin' ? (
+            <div className="flex items-center gap-2 mt-3">
+              <span className="font-comic text-[11px] bg-punch-red text-cream px-2.5 py-1 rounded border-2 border-ink shadow-[2px_2px_0px_#171510] font-bold flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5" />
+                ADMIN OVERDRIVE: UNRESTRICTED ACCESS ACROSS ALL DEPARTMENTS & SEMESTERS
+              </span>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              <span className="font-comic text-[11px] bg-comic-yellow text-ink px-2.5 py-1 rounded border-2 border-ink shadow-[2px_2px_0px_#171510] font-bold">
+                🎯 YOUR BATCH: {user?.department || 'Computer Science'} • SEMESTER {user?.semester || 1}
+              </span>
+              <span className="font-sans text-[11px] text-olive-dark font-medium">
+                Locked to your verified academic syllabus.
+              </span>
+            </div>
+          )}
         </div>
 
         <ComicBadge variant="yellow" className="text-xs">
@@ -107,7 +129,7 @@ export const QuestionBank = () => {
       </div>
 
       {/* Filter & Search Bar */}
-      <div className="comic-box bg-cream p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className={`comic-box bg-cream p-4 grid grid-cols-1 ${user?.role === 'admin' ? 'sm:grid-cols-4' : 'sm:grid-cols-2'} gap-3`}>
         {/* Search */}
         <div className="relative">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-ink pointer-events-none" />
@@ -123,24 +145,53 @@ export const QuestionBank = () => {
           />
         </div>
 
-        {/* Semester Filter */}
-        <div>
-          <select
-            value={selectedSemester}
-            onChange={(e) => {
-              setSelectedSemester(e.target.value);
-              setPage(1);
-            }}
-            className="comic-input text-xs py-2 bg-white font-mono"
-          >
-            <option value="">All Semesters</option>
-            {semesters.map((s) => (
-              <option key={s.id} value={s.id}>
-                Semester {s.number} ({s.name})
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Department Filter (Admin Only) */}
+        {user?.role === 'admin' && (
+          <div>
+            <select
+              value={selectedDepartment}
+              onChange={(e) => {
+                setSelectedDepartment(e.target.value);
+                setPage(1);
+              }}
+              className="comic-input text-xs py-2 bg-white font-mono"
+            >
+              <option value="">All Departments</option>
+              {[
+                'Computer Science',
+                'Information Tech',
+                'Data Science',
+                'AI & ML',
+                'Electronics',
+              ].map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Semester Filter (Admin Only) */}
+        {user?.role === 'admin' && (
+          <div>
+            <select
+              value={selectedSemester}
+              onChange={(e) => {
+                setSelectedSemester(e.target.value);
+                setPage(1);
+              }}
+              className="comic-input text-xs py-2 bg-white font-mono"
+            >
+              <option value="">All Semesters</option>
+              {semesters.map((s) => (
+                <option key={s.id} value={s.id}>
+                  Semester {s.number} ({s.name})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Subject Filter */}
         <div>
@@ -217,7 +268,13 @@ export const QuestionBank = () => {
                 )}
 
                 {/* Metadata badges */}
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] font-mono text-ink/70">
+                <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[10px] font-mono text-ink/75">
+                  <span className="bg-cream font-bold px-1.5 py-0.5 border border-ink/40 rounded">
+                    {doc.department || 'All Depts'}
+                  </span>
+                  <span className="bg-cream px-1.5 py-0.5 border border-ink/40 rounded">
+                    Sem {doc.semester_id || 'All'}
+                  </span>
                   <span className="bg-cream px-1.5 py-0.5 border border-ink/40 rounded flex items-center gap-1">
                     <FileText className="w-3 h-3" /> {doc.page_count || 1} Pages
                   </span>

@@ -30,6 +30,7 @@ export const Profile = () => {
   const [semester, setSemester] = useState(3);
   const [department, setDepartment] = useState('');
   const [bio, setBio] = useState('');
+  const [changeReason, setChangeReason] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -62,16 +63,22 @@ export const Profile = () => {
         semester: parseInt(semester, 10),
         department,
         bio,
+        change_reason: changeReason,
       });
 
       if (res.data?.success) {
-        setProfileData((prev) => ({ ...prev, ...res.data.profile }));
+        setProfileData((prev) => ({
+          ...prev,
+          ...res.data.profile,
+          pendingChangeRequest: res.data.pendingChangeRequest !== undefined ? res.data.pendingChangeRequest : prev?.pendingChangeRequest,
+        }));
         updateUser(res.data.profile);
         setIsEditing(false);
-        toast.success('Profile updated successfully!');
+        setChangeReason('');
+        toast.success(res.data.message || 'Profile updated successfully!');
       }
     } catch (err) {
-      toast.error('Failed to update profile.');
+      toast.error(err.response?.data?.error || 'Failed to update profile.');
     } finally {
       setSaving(false);
     }
@@ -97,6 +104,30 @@ export const Profile = () => {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 text-left select-none">
+      {/* Pending Department / Semester Change Request Alert */}
+      {p.pendingChangeRequest && (
+        <div className="comic-box bg-comic-yellow p-4 border-[3px] border-ink shadow-[4px_4px_0px_#171510] flex items-start gap-3">
+          <Clock className="w-5 h-5 text-punch-red flex-shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <h4 className="font-heading text-sm uppercase text-ink flex items-center gap-2">
+              <span>ACADEMIC CHANGE REQUEST PENDING ADMIN APPROVAL</span>
+              <span className="font-comic text-[9px] bg-punch-red text-cream px-1.5 py-0.2 rounded border border-ink">
+                UNDER REVIEW
+              </span>
+            </h4>
+            <p className="font-sans text-xs text-ink/80 font-medium">
+              You requested a transfer to <strong>{p.pendingChangeRequest.requested_department} • Semester {p.pendingChangeRequest.requested_semester}</strong>.
+              Your materials and daily battle access will switch as soon as an administrator verifies and approves your request.
+            </p>
+            {p.pendingChangeRequest.reason && (
+              <p className="font-mono text-[11px] text-ink/70 italic">
+                Reason given: "{p.pendingChangeRequest.reason}"
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Profile Header Box */}
       <div className="comic-box-lg bg-cream p-6 sm:p-8 relative flex flex-col md:flex-row items-center justify-between gap-6">
         <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5 text-center sm:text-left">
@@ -262,14 +293,51 @@ export const Profile = () => {
                   <label className="font-comic text-xs uppercase tracking-wide text-ink block mb-1">
                     DEPARTMENT
                   </label>
-                  <input
-                    type="text"
+                  <select
                     value={department}
                     onChange={(e) => setDepartment(e.target.value)}
                     className="comic-input text-xs py-2 bg-white"
-                  />
+                  >
+                    {[
+                      'Computer Science',
+                      'Information Tech',
+                      'Data Science',
+                      'AI & ML',
+                      'Electronics',
+                    ].map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
+
+              {/* Notice if Department or Semester was modified */}
+              {p.role !== 'admin' && (department !== p.department || parseInt(semester, 10) !== parseInt(p.semester, 10)) && (
+                <div className="comic-box-sm bg-comic-yellow/30 border-2 border-ink p-3 space-y-2">
+                  <div className="flex items-center gap-1.5 text-punch-red font-comic text-xs uppercase font-bold">
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>REQUIRES ADMIN APPROVAL</span>
+                  </div>
+                  <p className="font-sans text-[11px] text-ink/80 leading-snug">
+                    Department and Semester changes are verified by administrators to prevent unauthorized access. Once approved, your content vault will switch.
+                  </p>
+                  <div>
+                    <label className="font-comic text-[10px] uppercase text-ink block mb-1">
+                      REASON FOR TRANSFER (REQUIRED):
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Transferred branch / Promoted to next sem"
+                      value={changeReason}
+                      onChange={(e) => setChangeReason(e.target.value)}
+                      className="comic-input text-xs py-1.5 bg-white"
+                    />
+                  </div>
+                </div>
+              )}
 
               <ComicInput
                 label="Personal Bio / Exam Target"

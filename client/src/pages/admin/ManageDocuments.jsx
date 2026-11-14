@@ -140,16 +140,22 @@ export const ManageDocuments = () => {
                 className="p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 hover:bg-cream/40 transition-colors"
               >
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <span className="font-comic text-[10px] bg-comic-yellow text-ink px-1.5 py-0.2 rounded border border-ink">
                       {doc.subject_name || 'General'}
                     </span>
-                    <h4 className="font-heading text-lg uppercase text-ink">
+                    <span className="font-comic text-[10px] bg-cream font-bold text-ink px-1.5 py-0.2 rounded border border-ink">
+                      {doc.department || 'All Departments'}
+                    </span>
+                    <span className="font-comic text-[10px] bg-secondary-grey text-ink px-1.5 py-0.2 rounded border border-ink">
+                      Sem {doc.semester_id || 'All'}
+                    </span>
+                    <h4 className="font-heading text-lg uppercase text-ink ml-1">
                       {doc.title}
                     </h4>
                   </div>
                   <div className="text-[11px] font-mono text-olive-dark mt-0.5">
-                    {doc.original_name} • {doc.page_count || 1} Pages • Sem {doc.semester_id || 'All'} • Uploaded: {new Date(doc.created_at).toLocaleDateString()}
+                    {doc.original_name} • {doc.page_count || 1} Pages • Uploaded: {new Date(doc.created_at).toLocaleDateString()}
                   </div>
                 </div>
 

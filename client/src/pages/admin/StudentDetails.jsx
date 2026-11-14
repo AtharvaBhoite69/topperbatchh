@@ -12,12 +12,21 @@ export const StudentDetails = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Edit Department & Semester state
+  const [editDept, setEditDept] = useState('');
+  const [editSem, setEditSem] = useState(1);
+  const [editStatus, setEditStatus] = useState('approved');
+  const [updatingAcademic, setUpdatingAcademic] = useState(false);
+
   useEffect(() => {
     const fetchStudent = async () => {
       try {
         const res = await adminApi.getStudent(id);
         if (res.data?.success) {
           setData(res.data);
+          setEditDept(res.data.student?.department || 'Computer Science');
+          setEditSem(res.data.student?.semester || 1);
+          setEditStatus(res.data.student?.status || 'approved');
         }
       } catch (err) {
         toast.error('Could not load student profile.');
@@ -28,6 +37,35 @@ export const StudentDetails = () => {
 
     fetchStudent();
   }, [id]);
+
+  const handleUpdateAcademic = async (e) => {
+    e.preventDefault();
+    setUpdatingAcademic(true);
+    try {
+      const res = await adminApi.updateStudent(id, {
+        department: editDept,
+        semester: parseInt(editSem, 10),
+        status: editStatus,
+      });
+
+      if (res.data?.success) {
+        toast.success(res.data.message || 'Student academic access updated!');
+        setData((prev) => ({
+          ...prev,
+          student: {
+            ...prev.student,
+            department: editDept,
+            semester: parseInt(editSem, 10),
+            status: editStatus,
+          },
+        }));
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to update student.');
+    } finally {
+      setUpdatingAcademic(false);
+    }
+  };
 
   const handleRevokeSessions = async () => {
     try {
@@ -84,6 +122,85 @@ export const StudentDetails = () => {
         >
           REVOKE ALL SESSIONS
         </ComicButton>
+      </div>
+
+      {/* Admin Department & Semester Override */}
+      <div className="comic-box bg-cream p-5">
+        <div className="flex items-center gap-2 mb-3 pb-2 border-b-2 border-ink/20">
+          <Shield className="w-5 h-5 text-punch-red" />
+          <h3 className="font-heading text-lg uppercase text-ink">
+            ADMIN ACADEMIC ACCESS CONTROL
+          </h3>
+        </div>
+
+        <form onSubmit={handleUpdateAcademic} className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+          <div>
+            <label className="font-comic text-xs uppercase text-ink block mb-1">
+              DEPARTMENT:
+            </label>
+            <select
+              value={editDept}
+              onChange={(e) => setEditDept(e.target.value)}
+              className="comic-input text-xs py-2 bg-white"
+            >
+              {[
+                'Computer Science',
+                'Information Tech',
+                'Data Science',
+                'AI & ML',
+                'Electronics',
+              ].map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="font-comic text-xs uppercase text-ink block mb-1">
+              SEMESTER:
+            </label>
+            <select
+              value={editSem}
+              onChange={(e) => setEditSem(e.target.value)}
+              className="comic-input text-xs py-2 bg-white"
+            >
+              {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => (
+                <option key={s} value={s}>
+                  Semester {s}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="font-comic text-xs uppercase text-ink block mb-1">
+              ACCOUNT STATUS:
+            </label>
+            <select
+              value={editStatus}
+              onChange={(e) => setEditStatus(e.target.value)}
+              className="comic-input text-xs py-2 bg-white"
+            >
+              <option value="approved">Approved</option>
+              <option value="suspended">Suspended</option>
+              <option value="pending">Pending</option>
+            </select>
+          </div>
+
+          <div>
+            <ComicButton
+              type="submit"
+              variant="yellow"
+              size="sm"
+              loading={updatingAcademic}
+              className="w-full"
+            >
+              UPDATE ACCESS
+            </ComicButton>
+          </div>
+        </form>
       </div>
 
       {/* Recent Attempts */}

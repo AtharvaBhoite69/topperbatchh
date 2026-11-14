@@ -69,16 +69,34 @@ router.use(authenticate);
  */
 router.get('/', requireApproved, async (req, res, next) => {
   try {
-    const { semester, subject_id, unit_id, search, page = 1, limit = 20 } = req.query;
+    const { semester, department, subject_id, unit_id, search, page = 1, limit = 20 } = req.query;
     const db = getDb();
     const { limit: l, offset: o } = paginate(page, limit);
 
     let whereConditions = ['d.is_visible = 1'];
     let params = [];
 
-    if (semester) {
-      whereConditions.push('d.semester_id = ?');
-      params.push(semester);
+    // STRICT ROLE-BASED ACCESS CONTROL
+    if (req.user.role === 'student') {
+      // Students can ONLY see documents for their assigned semester and department
+      if (req.user.semester) {
+        whereConditions.push('d.semester_id = ?');
+        params.push(req.user.semester);
+      }
+      if (req.user.department) {
+        whereConditions.push('(d.department = ? OR d.department IS NULL)');
+        params.push(req.user.department);
+      }
+    } else {
+      // Admins have unrestricted access and can filter by any semester or department
+      if (semester) {
+        whereConditions.push('d.semester_id = ?');
+        params.push(semester);
+      }
+      if (department) {
+        whereConditions.push('d.department = ?');
+        params.push(department);
+      }
     }
 
     if (subject_id) {
@@ -139,15 +157,35 @@ router.get('/', requireApproved, async (req, res, next) => {
  */
 router.get('/subjects', requireApproved, async (req, res, next) => {
   try {
-    const { semester_id } = req.query;
+    const { semester_id, department } = req.query;
     const db = getDb();
 
     let sql = 'SELECT * FROM subjects';
+    let whereConditions = [];
     let params = [];
 
-    if (semester_id) {
-      sql += ' WHERE semester_id = ?';
-      params.push(semester_id);
+    if (req.user.role === 'student') {
+      if (req.user.semester) {
+        whereConditions.push('semester_id = ?');
+        params.push(req.user.semester);
+      }
+      if (req.user.department) {
+        whereConditions.push('(department = ? OR department IS NULL)');
+        params.push(req.user.department);
+      }
+    } else {
+      if (semester_id) {
+        whereConditions.push('semester_id = ?');
+        params.push(semester_id);
+      }
+      if (department) {
+        whereConditions.push('(department = ? OR department IS NULL)');
+        params.push(department);
+      }
+    }
+
+    if (whereConditions.length > 0) {
+      sql += ' WHERE ' + whereConditions.join(' AND ');
     }
 
     sql += ' ORDER BY name ASC';
@@ -237,6 +275,16 @@ router.get('/:id', requireApproved, async (req, res, next) => {
       return res.status(403).json({ error: 'Access to this document is restricted.' });
     }
 
+    // Role-based Department & Semester enforcement
+    if (req.user.role === 'student') {
+      if (doc.semester_id && req.user.semester && doc.semester_id !== req.user.semester) {
+        return res.status(403).json({ error: 'Access denied: This material belongs to a different semester.' });
+      }
+      if (doc.department && req.user.department && doc.department.trim().toLowerCase() !== req.user.department.trim().toLowerCase()) {
+        return res.status(403).json({ error: 'Access denied: This material belongs to a different department.' });
+      }
+    }
+
     return res.status(200).json({ success: true, document: doc });
   } catch (err) {
     next(err);
@@ -259,6 +307,16 @@ router.get('/:id/view', requireApproved, async (req, res, next) => {
 
     if (!doc.is_visible && req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Document access is currently disabled.' });
+    }
+
+    // Role-based Department & Semester enforcement
+    if (req.user.role === 'student') {
+      if (doc.semester_id && req.user.semester && doc.semester_id !== req.user.semester) {
+        return res.status(403).json({ error: 'Access denied: This material belongs to a different semester.' });
+      }
+      if (doc.department && req.user.department && doc.department.trim().toLowerCase() !== req.user.department.trim().toLowerCase()) {
+        return res.status(403).json({ error: 'Access denied: This material belongs to a different department.' });
+      }
     }
 
     // 1. Check Supabase Storage Private Signed URL (1-hour validity)
@@ -349,7 +407,7 @@ router.post('/', requireAdmin, upload.single('file'), async (req, res, next) => 
       return res.status(400).json({ error: 'No PDF file uploaded.' });
     }
 
-    const { title, description, semester_id, subject_id, unit_id, topic } = req.body;
+    const { title, description, semester_id, department, subject_id, unit_id, topic } = req.body;
     if (!title) {
       return res.status(400).json({ error: 'Document title is required.' });
     }
@@ -367,12 +425,12 @@ router.post('/', requireAdmin, upload.single('file'), async (req, res, next) => 
       const extracted = await extractText(filePath);
       pageCount = extracted.pageCount || 0;
 
-      // Save document record
+      // Save document record with Department and Semester
       await db.prepare(`
         INSERT INTO documents (
           id, title, description, filename, original_name, file_size,
-          subject_id, unit_id, semester_id, topic, uploaded_by, page_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          subject_id, unit_id, semester_id, department, topic, uploaded_by, page_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         docId,
         title.trim(),
@@ -383,6 +441,7 @@ router.post('/', requireAdmin, upload.single('file'), async (req, res, next) => 
         subject_id || null,
         unit_id || null,
         semester_id ? parseInt(semester_id, 10) : null,
+        department ? department.trim() : null,
         topic ? topic.trim() : null,
         req.user.id,
         pageCount
@@ -404,8 +463,18 @@ router.post('/', requireAdmin, upload.single('file'), async (req, res, next) => 
         console.error('Background RAG index error:', err.message);
       });
 
-      // Notify students
-      const students = await db.prepare("SELECT id FROM users WHERE status = 'approved'").all();
+      // Notify only students who belong to this department & semester
+      let studentSql = "SELECT id FROM users WHERE status = 'approved' AND role = 'student'";
+      let notifyParams = [];
+      if (semester_id) {
+        studentSql += ' AND semester = ?';
+        notifyParams.push(parseInt(semester_id, 10));
+      }
+      if (department) {
+        studentSql += ' AND (department = ? OR department IS NULL)';
+        notifyParams.push(department.trim());
+      }
+      const students = await db.prepare(studentSql).all(...notifyParams);
       const notifyStmt = db.prepare(`
         INSERT INTO notifications (id, user_id, type, title, message, link)
         VALUES (?, ?, 'document', '📚 New Material Dropped!', ?, ?)
@@ -438,7 +507,7 @@ router.post('/', requireAdmin, upload.single('file'), async (req, res, next) => 
 router.put('/:id', requireAdmin, async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { title, description, semester_id, subject_id, unit_id, topic, is_visible } = req.body;
+    const { title, description, semester_id, department, subject_id, unit_id, topic, is_visible } = req.body;
     const db = getDb();
 
     await db.prepare(`
@@ -446,6 +515,7 @@ router.put('/:id', requireAdmin, async (req, res, next) => {
       SET title = COALESCE(?, title),
           description = COALESCE(?, description),
           semester_id = COALESCE(?, semester_id),
+          department = COALESCE(?, department),
           subject_id = COALESCE(?, subject_id),
           unit_id = COALESCE(?, unit_id),
           topic = COALESCE(?, topic),
@@ -453,12 +523,13 @@ router.put('/:id', requireAdmin, async (req, res, next) => {
           updated_at = datetime('now')
       WHERE id = ?
     `).run(
-      title,
-      description,
-      semester_id ? parseInt(semester_id, 10) : null,
-      subject_id,
-      unit_id,
-      topic,
+      title ? title.trim() : null,
+      description !== undefined ? (description ? description.trim() : null) : null,
+      semester_id !== undefined ? (semester_id ? parseInt(semester_id, 10) : null) : null,
+      department !== undefined ? (department ? department.trim() : null) : null,
+      subject_id !== undefined ? (subject_id || null) : null,
+      unit_id !== undefined ? (unit_id || null) : null,
+      topic !== undefined ? (topic ? topic.trim() : null) : null,
       is_visible !== undefined ? (is_visible ? 1 : 0) : null,
       id
     );

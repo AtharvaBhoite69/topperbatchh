@@ -213,8 +213,33 @@ router.post('/conversations/:id/messages', async (req, res, next) => {
     }
 
     let activeDocId = document_id || conv.document_id;
+    if (activeDocId && req.user.role === 'student') {
+      const doc = await db.prepare('SELECT semester_id, department FROM documents WHERE id = ?').get(activeDocId);
+      if (doc) {
+        if (doc.semester_id && req.user.semester && doc.semester_id !== req.user.semester) {
+          return res.status(403).json({ error: 'Access denied: Content belongs to a different semester.' });
+        }
+        if (doc.department && req.user.department && doc.department.trim().toLowerCase() !== req.user.department.trim().toLowerCase()) {
+          return res.status(403).json({ error: 'Access denied: Content belongs to a different department.' });
+        }
+      }
+    }
+
     if (!activeDocId) {
-      const topDoc = await db.prepare('SELECT id FROM documents WHERE is_visible = 1 ORDER BY created_at DESC LIMIT 1').get();
+      let topQuery = 'SELECT id FROM documents WHERE is_visible = 1';
+      let topParams = [];
+      if (req.user.role === 'student') {
+        if (req.user.semester) {
+          topQuery += ' AND semester_id = ?';
+          topParams.push(req.user.semester);
+        }
+        if (req.user.department) {
+          topQuery += ' AND (department = ? OR department IS NULL)';
+          topParams.push(req.user.department);
+        }
+      }
+      topQuery += ' ORDER BY created_at DESC LIMIT 1';
+      const topDoc = await db.prepare(topQuery).get(...topParams);
       if (topDoc) activeDocId = topDoc.id;
     }
 
@@ -283,8 +308,33 @@ router.post('/conversations/:id/messages/stream', async (req, res) => {
   }
 
   let activeDocId = document_id || conv.document_id;
+  if (activeDocId && req.user.role === 'student') {
+    const doc = await db.prepare('SELECT semester_id, department FROM documents WHERE id = ?').get(activeDocId);
+    if (doc) {
+      if (doc.semester_id && req.user.semester && doc.semester_id !== req.user.semester) {
+        return res.status(403).json({ error: 'Access denied: Content belongs to a different semester.' });
+      }
+      if (doc.department && req.user.department && doc.department.trim().toLowerCase() !== req.user.department.trim().toLowerCase()) {
+        return res.status(403).json({ error: 'Access denied: Content belongs to a different department.' });
+      }
+    }
+  }
+
   if (!activeDocId) {
-    const topDoc = await db.prepare('SELECT id FROM documents WHERE is_visible = 1 ORDER BY created_at DESC LIMIT 1').get();
+    let topQuery = 'SELECT id FROM documents WHERE is_visible = 1';
+    let topParams = [];
+    if (req.user.role === 'student') {
+      if (req.user.semester) {
+        topQuery += ' AND semester_id = ?';
+        topParams.push(req.user.semester);
+      }
+      if (req.user.department) {
+        topQuery += ' AND (department = ? OR department IS NULL)';
+        topParams.push(req.user.department);
+      }
+    }
+    topQuery += ' ORDER BY created_at DESC LIMIT 1';
+    const topDoc = await db.prepare(topQuery).get(...topParams);
     if (topDoc) activeDocId = topDoc.id;
   }
 

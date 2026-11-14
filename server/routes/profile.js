@@ -78,6 +78,14 @@ router.get('/', async (req, res, next) => {
       LIMIT 5
     `).all(req.user.id);
 
+    // Get pending department/semester change request if any
+    const pendingChangeRequest = await db.prepare(`
+      SELECT * FROM department_change_requests
+      WHERE user_id = ? AND status = 'pending'
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get(req.user.id);
+
     return res.status(200).json({
       success: true,
       profile: {
@@ -85,6 +93,7 @@ router.get('/', async (req, res, next) => {
         rank: rankRow ? rankRow.rank : 1,
         achievements,
         recentActivity,
+        pendingChangeRequest: pendingChangeRequest || null,
       },
     });
   } catch (err) {
@@ -94,37 +103,101 @@ router.get('/', async (req, res, next) => {
 
 /**
  * PUT /api/profile
- * Update student profile permitted fields only
+ * Update student profile permitted fields.
+ * If department or semester is changed by a student, it creates a pending change request for admin approval.
  */
 router.put('/', async (req, res, next) => {
   try {
-    const { full_name, semester, department, bio, avatar_url } = req.body;
+    const { full_name, semester, department, bio, avatar_url, change_reason } = req.body;
     const db = getDb();
+    const currentUser = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    if (!currentUser) return res.status(404).json({ error: 'User not found.' });
 
+    let pendingRequestCreated = false;
+    let pendingRequest = null;
+
+    const requestedSem = semester !== undefined && semester !== null ? parseInt(semester, 10) : currentUser.semester;
+    const requestedDept = department !== undefined && department !== null && department.trim() ? department.trim() : currentUser.department;
+
+    const isSemChanged = requestedSem && requestedSem !== currentUser.semester;
+    const isDeptChanged = requestedDept && requestedDept.toLowerCase() !== (currentUser.department || '').toLowerCase();
+
+    // Students requesting branch or semester change enter the admin approval queue
+    if (req.user.role === 'student' && (isSemChanged || isDeptChanged)) {
+      const existingPending = await db.prepare(`
+        SELECT id FROM department_change_requests
+        WHERE user_id = ? AND status = 'pending'
+      `).get(req.user.id);
+
+      if (existingPending) {
+        await db.prepare(`
+          UPDATE department_change_requests
+          SET requested_department = ?,
+              requested_semester = ?,
+              reason = ?,
+              created_at = datetime('now')
+          WHERE id = ?
+        `).run(requestedDept, requestedSem, change_reason ? change_reason.trim() : null, existingPending.id);
+        pendingRequest = await db.prepare('SELECT * FROM department_change_requests WHERE id = ?').get(existingPending.id);
+      } else {
+        const reqId = generateId();
+        await db.prepare(`
+          INSERT INTO department_change_requests (
+            id, user_id, current_department, current_semester,
+            requested_department, requested_semester, reason, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+        `).run(
+          reqId,
+          req.user.id,
+          currentUser.department,
+          currentUser.semester,
+          requestedDept,
+          requestedSem,
+          change_reason ? change_reason.trim() : null
+        );
+        pendingRequest = await db.prepare('SELECT * FROM department_change_requests WHERE id = ?').get(reqId);
+      }
+      pendingRequestCreated = true;
+    } else if (req.user.role === 'admin') {
+      // Admins can change their own department & semester directly
+      await db.prepare(`
+        UPDATE users
+        SET semester = COALESCE(?, semester),
+            department = COALESCE(?, department)
+        WHERE id = ?
+      `).run(requestedSem, requestedDept, req.user.id);
+    }
+
+    // Update non-academic profile fields immediately
     await db.prepare(`
       UPDATE users
       SET full_name = COALESCE(?, full_name),
-          semester = COALESCE(?, semester),
-          department = COALESCE(?, department),
           bio = COALESCE(?, bio),
           avatar_url = COALESCE(?, avatar_url),
           updated_at = datetime('now')
       WHERE id = ?
     `).run(
       full_name ? full_name.trim() : null,
-      semester ? parseInt(semester, 10) : null,
-      department ? department.trim() : null,
-      bio ? bio.trim() : null,
+      bio !== undefined ? (bio ? bio.trim() : null) : null,
       avatar_url || null,
       req.user.id
     );
 
     const updatedUser = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
 
+    let message = 'Profile updated!';
+    if (pendingRequestCreated) {
+      message = `Profile updated! Request to switch to ${requestedDept} (Semester ${requestedSem}) submitted for admin review.`;
+    }
+
     return res.status(200).json({
       success: true,
-      message: 'Profile updated!',
-      profile: sanitizeUser(updatedUser),
+      message,
+      pendingChangeRequest: pendingRequest,
+      profile: {
+        ...sanitizeUser(updatedUser),
+        pendingChangeRequest: pendingRequest,
+      },
     });
   } catch (err) {
     next(err);

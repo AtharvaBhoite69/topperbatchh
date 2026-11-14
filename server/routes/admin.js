@@ -444,6 +444,243 @@ router.put('/students/:id/status', async (req, res, next) => {
 });
 
 /**
+ * PUT /api/admin/students/:id
+ * Direct administrative update of student details (department, semester, status, full_name)
+ */
+router.put('/students/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { department, semester, full_name, status } = req.body;
+    const db = getDb();
+
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    if (!user) {
+      return res.status(404).json({ error: 'Student not found.' });
+    }
+
+    await db.prepare(`
+      UPDATE users
+      SET department = COALESCE(?, department),
+          semester = COALESCE(?, semester),
+          full_name = COALESCE(?, full_name),
+          status = COALESCE(?, status),
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      department !== undefined ? (department ? department.trim() : null) : null,
+      semester !== undefined ? (semester ? parseInt(semester, 10) : null) : null,
+      full_name !== undefined ? (full_name ? full_name.trim() : null) : null,
+      status !== undefined ? status : null,
+      id
+    );
+
+    // If student had any pending change request, resolve it automatically as approved
+    if (department || semester) {
+      await db.prepare(`
+        UPDATE department_change_requests
+        SET status = 'approved',
+            admin_id = ?,
+            resolved_at = datetime('now')
+        WHERE user_id = ? AND status = 'pending'
+      `).run(req.user.id, id);
+    }
+
+    await logAudit(
+      req.user.id,
+      'DIRECT_UPDATE_STUDENT',
+      'user',
+      id,
+      { department, semester, full_name, status },
+      req
+    );
+
+    const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    return res.status(200).json({
+      success: true,
+      message: 'Student details updated successfully.',
+      student: sanitizeUser(updated),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/admin/department-requests
+ * List all department & semester change requests
+ */
+router.get('/department-requests', async (req, res, next) => {
+  try {
+    const { status = 'all' } = req.query;
+    const db = getDb();
+
+    let query = `
+      SELECT r.*,
+             u.full_name as student_name,
+             u.email as student_email,
+             u.avatar_url as student_avatar,
+             u.department as actual_department,
+             u.semester as actual_semester,
+             admin_u.full_name as reviewed_by_name
+      FROM department_change_requests r
+      JOIN users u ON r.user_id = u.id
+      LEFT JOIN users admin_u ON r.admin_id = admin_u.id
+    `;
+    let params = [];
+
+    if (status && status !== 'all') {
+      query += ' WHERE r.status = ?';
+      params.push(status);
+    }
+
+    query += " ORDER BY CASE WHEN r.status = 'pending' THEN 0 ELSE 1 END, r.created_at DESC";
+    const requests = await db.prepare(query).all(...params);
+
+    const pendingCountRow = await db.prepare(
+      "SELECT COUNT(*) as count FROM department_change_requests WHERE status = 'pending'"
+    ).get();
+
+    return res.status(200).json({
+      success: true,
+      requests,
+      pendingCount: parseInt(pendingCountRow?.count || 0, 10),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * PUT /api/admin/department-requests/:id/approve
+ * Approve student's department & semester change request
+ */
+router.put('/department-requests/:id/approve', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const db = getDb();
+
+    const request = await db.prepare('SELECT * FROM department_change_requests WHERE id = ?').get(id);
+    if (!request) {
+      return res.status(404).json({ error: 'Request not found.' });
+    }
+
+    if (request.status !== 'pending') {
+      return res.status(400).json({ error: `Request has already been ${request.status}.` });
+    }
+
+    // 1. Update student's department and semester in users table
+    await db.prepare(`
+      UPDATE users
+      SET department = ?,
+          semester = ?,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(request.requested_department, request.requested_semester, request.user_id);
+
+    // 2. Mark request as approved
+    await db.prepare(`
+      UPDATE department_change_requests
+      SET status = 'approved',
+          admin_id = ?,
+          resolved_at = datetime('now')
+      WHERE id = ?
+    `).run(req.user.id, id);
+
+    // 3. Notify student
+    const notifId = generateId();
+    await db.prepare(`
+      INSERT INTO notifications (id, user_id, type, title, message, link)
+      VALUES (?, ?, 'department_change', '🎉 Branch/Semester Approved!', ?, '/profile')
+    `).run(
+      notifId,
+      request.user_id,
+      `Your request to switch to ${request.requested_department} (Semester ${request.requested_semester}) has been approved by admin.`
+    );
+
+    await logAudit(
+      req.user.id,
+      'APPROVE_DEPT_CHANGE',
+      'user',
+      request.user_id,
+      {
+        requestId: id,
+        fromDept: request.current_department,
+        fromSem: request.current_semester,
+        toDept: request.requested_department,
+        toSem: request.requested_semester,
+      },
+      req
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: `Approved! Student has been assigned to ${request.requested_department} (Semester ${request.requested_semester}).`,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * PUT /api/admin/department-requests/:id/reject
+ * Reject student's department & semester change request
+ */
+router.put('/department-requests/:id/reject', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const db = getDb();
+
+    const request = await db.prepare('SELECT * FROM department_change_requests WHERE id = ?').get(id);
+    if (!request) {
+      return res.status(404).json({ error: 'Request not found.' });
+    }
+
+    if (request.status !== 'pending') {
+      return res.status(400).json({ error: `Request has already been ${request.status}.` });
+    }
+
+    // 1. Mark request as rejected
+    await db.prepare(`
+      UPDATE department_change_requests
+      SET status = 'rejected',
+          admin_id = ?,
+          admin_notes = ?,
+          resolved_at = datetime('now')
+      WHERE id = ?
+    `).run(req.user.id, reason ? reason.trim() : null, id);
+
+    // 2. Notify student
+    const notifId = generateId();
+    const reasonText = reason && reason.trim() ? ` Reason: "${reason.trim()}"` : '';
+    await db.prepare(`
+      INSERT INTO notifications (id, user_id, type, title, message, link)
+      VALUES (?, ?, 'department_change', '⚠️ Change Request Declined', ?, '/profile')
+    `).run(
+      notifId,
+      request.user_id,
+      `Your request to switch to ${request.requested_department} (Semester ${request.requested_semester}) was reviewed and declined.${reasonText}`
+    );
+
+    await logAudit(
+      req.user.id,
+      'REJECT_DEPT_CHANGE',
+      'user',
+      request.user_id,
+      { requestId: id, reason },
+      req
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Department & Semester change request rejected.',
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * DELETE /api/admin/sessions/user/:userId
  */
 router.delete('/sessions/user/:userId', async (req, res, next) => {

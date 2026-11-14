@@ -18,6 +18,8 @@ export const ManageChallenges = () => {
   const [showModal, setShowModal] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [department, setDepartment] = useState('Computer Science');
+  const [semester, setSemester] = useState(5);
   const [challengeDate, setChallengeDate] = useState(
     new Date().toISOString().split('T')[0]
   );
@@ -67,6 +69,8 @@ export const ManageChallenges = () => {
       const res = await api.post('/quiz/challenges', {
         title: title.trim(),
         description: description.trim(),
+        department: department === 'All' ? null : department,
+        semester: parseInt(semester, 10),
         challenge_date: challengeDate,
         duration_minutes: parseInt(durationMinutes, 10),
         subject_id: subjectId || null,
@@ -153,11 +157,17 @@ export const ManageChallenges = () => {
               className="comic-box p-5 bg-white flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
             >
               <div>
-                <div className="flex items-center gap-2 mb-1">
+                <div className="flex flex-wrap items-center gap-1.5 mb-1">
                   <span className="font-comic text-[10px] bg-punch-red text-cream px-1.5 py-0.2 rounded border border-ink">
                     {c.challenge_date}
                   </span>
                   <span className="font-comic text-[10px] bg-comic-yellow text-ink px-1.5 py-0.2 rounded border border-ink">
+                    {c.department || 'All Depts'}
+                  </span>
+                  <span className="font-comic text-[10px] bg-secondary-grey text-ink px-1.5 py-0.2 rounded border border-ink">
+                    Sem {c.semester || 'All'}
+                  </span>
+                  <span className="font-comic text-[10px] bg-cream text-ink px-1.5 py-0.2 rounded border border-ink">
                     {c.subject_name || 'Mixed Subjects'}
                   </span>
                   {c.is_active === 1 && (
@@ -216,6 +226,49 @@ export const ManageChallenges = () => {
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
               />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-comic text-xs uppercase text-ink block mb-1">
+                    DEPARTMENT
+                  </label>
+                  <select
+                    value={department}
+                    onChange={(e) => setDepartment(e.target.value)}
+                    className="comic-input text-xs py-2 bg-white"
+                  >
+                    {[
+                      'Computer Science',
+                      'Information Tech',
+                      'Data Science',
+                      'AI & ML',
+                      'Electronics',
+                      'All Departments (Common)',
+                    ].map((d) => (
+                      <option key={d} value={d === 'All Departments (Common)' ? 'All' : d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="font-comic text-xs uppercase text-ink block mb-1">
+                    SEMESTER
+                  </label>
+                  <select
+                    value={semester}
+                    onChange={(e) => setSemester(e.target.value)}
+                    className="comic-input text-xs py-2 bg-white"
+                  >
+                    {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => (
+                      <option key={s} value={s}>
+                        Semester {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>

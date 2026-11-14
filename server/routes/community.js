@@ -103,23 +103,33 @@ router.use(authenticate, requireApproved);
 router.get('/channels', async (req, res, next) => {
   try {
     const db = getDb();
-    let channels = await db.prepare(`
+    let channelQuery = `
       SELECT c.*,
              (SELECT COUNT(*) FROM community_messages m WHERE m.channel_id = c.id AND m.is_deleted = 0) as message_count
       FROM community_channels c
-      ORDER BY c.display_order ASC, c.name ASC
-    `).all();
+    `;
+    let channelParams = [];
+
+    // Students only see global channels and channels matching their department & semester
+    if (req.user.role === 'student') {
+      channelQuery += `
+        WHERE (c.department IS NULL AND c.semester IS NULL)
+           OR (
+             (c.department IS NULL OR c.department = ?)
+             AND (c.semester IS NULL OR c.semester = ?)
+           )
+      `;
+      channelParams.push(req.user.department || '', req.user.semester || 1);
+    }
+
+    channelQuery += ' ORDER BY c.display_order ASC, c.name ASC';
+    let channels = await db.prepare(channelQuery).all(...channelParams);
 
     // If channels table is empty on fresh cold start, auto-seed the official 3 channels immediately
     if (!channels || channels.length === 0) {
       const { seedDatabase } = require('../database/seed');
       seedDatabase();
-      channels = await db.prepare(`
-        SELECT c.*,
-               (SELECT COUNT(*) FROM community_messages m WHERE m.channel_id = c.id AND m.is_deleted = 0) as message_count
-        FROM community_channels c
-        ORDER BY c.display_order ASC, c.name ASC
-      `).all();
+      channels = await db.prepare(channelQuery).all(...channelParams);
     }
 
     return res.status(200).json({ success: true, channels });
@@ -143,6 +153,16 @@ router.get('/channels/:id/messages', async (req, res, next) => {
     const channel = await db.prepare('SELECT * FROM community_channels WHERE id = ?').get(id);
     if (!channel) {
       return res.status(404).json({ error: 'Channel not found.' });
+    }
+
+    // Verify channel access for students
+    if (req.user.role === 'student') {
+      if (channel.semester && req.user.semester && channel.semester !== req.user.semester) {
+        return res.status(403).json({ error: `Access denied: Channel belongs to Semester ${channel.semester}.` });
+      }
+      if (channel.department && req.user.department && channel.department.trim().toLowerCase() !== req.user.department.trim().toLowerCase()) {
+        return res.status(403).json({ error: `Access denied: Channel belongs to ${channel.department}.` });
+      }
     }
 
     const messages = await db.prepare(`
@@ -215,6 +235,16 @@ router.post('/channels/:id/messages', async (req, res, next) => {
     const channel = await db.prepare('SELECT * FROM community_channels WHERE id = ?').get(id);
     if (!channel) {
       return res.status(404).json({ error: 'Channel not found.' });
+    }
+
+    // Verify channel access for students
+    if (req.user.role === 'student') {
+      if (channel.semester && req.user.semester && channel.semester !== req.user.semester) {
+        return res.status(403).json({ error: `Access denied: Channel belongs to Semester ${channel.semester}.` });
+      }
+      if (channel.department && req.user.department && channel.department.trim().toLowerCase() !== req.user.department.trim().toLowerCase()) {
+        return res.status(403).json({ error: `Access denied: Channel belongs to ${channel.department}.` });
+      }
     }
 
     // STRICT PERMISSION CHECK: Announcements Channel
@@ -300,6 +330,16 @@ router.post('/channels/:id/upload', upload.single('file'), async (req, res, next
     const channel = await db.prepare('SELECT * FROM community_channels WHERE id = ?').get(id);
     if (!channel) {
       return res.status(404).json({ error: 'Channel not found.' });
+    }
+
+    // Verify channel access for students
+    if (req.user.role === 'student') {
+      if (channel.semester && req.user.semester && channel.semester !== req.user.semester) {
+        return res.status(403).json({ error: `Access denied: Channel belongs to Semester ${channel.semester}.` });
+      }
+      if (channel.department && req.user.department && channel.department.trim().toLowerCase() !== req.user.department.trim().toLowerCase()) {
+        return res.status(403).json({ error: `Access denied: Channel belongs to ${channel.department}.` });
+      }
     }
 
     // Strict check if someone attempts to upload to Announcements

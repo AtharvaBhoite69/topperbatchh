@@ -53,6 +53,8 @@ export const MCQGenerator = () => {
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [publishType, setPublishType] = useState('challenge'); // 'challenge' | 'question_bank' | 'both'
   const [challengeTitle, setChallengeTitle] = useState('');
+  const [publishDepartment, setPublishDepartment] = useState('Computer Science');
+  const [publishSemester, setPublishSemester] = useState(5);
   const [challengeDate, setChallengeDate] = useState(new Date().toISOString().split('T')[0]);
   const [durationMinutes, setDurationMinutes] = useState(15);
   const [scoringCorrect, setScoringCorrect] = useState(10);
@@ -300,6 +302,8 @@ export const MCQGenerator = () => {
         challengeDate,
         durationMinutes,
         scoringCorrect,
+        department: publishDepartment === 'All' ? null : publishDepartment,
+        semester: parseInt(publishSemester, 10),
         subjectId: null,
         approvedQuestions: approvedList,
       });
@@ -850,6 +854,49 @@ export const MCQGenerator = () => {
                       onChange={(e) => setChallengeTitle(e.target.value)}
                       className="comic-input text-xs sm:text-sm bg-white"
                     />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="font-comic text-xs uppercase text-ink block mb-1">
+                        TARGET DEPARTMENT:
+                      </label>
+                      <select
+                        value={publishDepartment}
+                        onChange={(e) => setPublishDepartment(e.target.value)}
+                        className="comic-input text-xs bg-white"
+                      >
+                        {[
+                          'Computer Science',
+                          'Information Tech',
+                          'Data Science',
+                          'AI & ML',
+                          'Electronics',
+                          'All Departments (Common)',
+                        ].map((d) => (
+                          <option key={d} value={d === 'All Departments (Common)' ? 'All' : d}>
+                            {d}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="font-comic text-xs uppercase text-ink block mb-1">
+                        TARGET SEMESTER:
+                      </label>
+                      <select
+                        value={publishSemester}
+                        onChange={(e) => setPublishSemester(e.target.value)}
+                        className="comic-input text-xs bg-white"
+                      >
+                        {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => (
+                          <option key={s} value={s}>
+                            Semester {s}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
